@@ -1,0 +1,706 @@
+use std::{collections::HashMap, rc::Rc, result};
+
+use crate::{
+    parse::model::{Density, DensityType, NormalNoise},
+    spmt::model::{
+        BinaryOperator, DensityFunction, DensityFunctionRef, DensityInput, Expression, Function,
+        FunctionRef, SPMT, Statement, Variable, VariableType,
+    },
+    transform_spmt::{
+        BuilderState, DensityFunctionCache, NoiseCache, anonvar, newvar, noise::lower_normal_noise,
+    },
+};
+
+/// Builds a single density function for a given density.
+/// This is used to build the density functions for the model,
+/// Statements can be added to the builder
+pub struct DensityBuilder<'a, 'm> {
+    density_function: DensityFunction<'m>,
+    function: Option<Function<'m>>,
+    pub arena: &'m bumpalo::Bump,
+
+    builder_state: Option<BuilderState<'a, 'm>>,
+
+    density_function_inputs: HashMap<Density<'a>, DensityInput<'m>>,
+    noise_inputs: std::collections::HashMap<NormalNoise<'a>, DensityInput<'m>>,
+    helper_functions: Vec<FunctionRef<'m>>,
+    p: Rc<Variable>,
+}
+
+impl<'a, 'm> DensityBuilder<'a, 'm> {
+    pub fn new(arena: &'m bumpalo::Bump, state: BuilderState<'a, 'm>) -> Self {
+        let s = Self {
+            density_function: DensityFunction {
+                body: Vec::new(),
+                canonical_name: None,
+                density_inputs: Vec::new(),
+                variables: Vec::new(),
+                helper_functions: Vec::new(),
+            },
+            function: None,
+            helper_functions: Vec::new(),
+            arena,
+
+            builder_state: Some(state),
+            density_function_inputs: HashMap::new(),
+            noise_inputs: HashMap::new(),
+            p: newvar("p", VariableType::Vec3),
+        };
+        s
+    }
+
+    pub fn new_named(
+        arena: &'m bumpalo::Bump,
+        state: BuilderState<'a, 'm>,
+        canonical_name: Option<String>,
+    ) -> Self {
+        let mut s = Self::new(arena, state);
+        s.density_function.canonical_name = canonical_name;
+        s
+    }
+
+    pub fn switch_function(&mut self, function: Function<'m>) -> Option<Function<'m>> {
+        let old = self.function.replace(function);
+        old
+    }
+
+    pub fn finish(
+        self,
+        ret: Expression<'m>,
+    ) -> (
+        DensityFunction<'m>,
+        Vec<FunctionRef<'m>>,
+        BuilderState<'a, 'm>,
+    ) {
+        let mut function = self.density_function;
+        function.helper_functions = self.helper_functions.clone();
+        function.add_statement(Statement::Return(ret));
+        (
+            function,
+            self.helper_functions,
+            self.builder_state
+                .expect("Builder state is not initialized"),
+        )
+    }
+
+    pub fn finish_and_continue(
+        &mut self,
+        ret: Expression<'m>,
+        replacement: Option<Function<'m>>,
+    ) -> FunctionRef<'m> {
+        let mut function = self.function.take().expect("No function to finish");
+        function.add_statement(Statement::Return(ret));
+
+        let function_ref = FunctionRef::new(self.arena.alloc(function));
+        self.helper_functions.push(function_ref);
+
+        if let Some(replacement) = replacement {
+            self.function = Some(replacement);
+        }
+
+        function_ref
+    }
+
+    pub fn add_statement(&mut self, statement: Statement<'m>) {
+        match &mut self.function {
+            Some(func) => func.body.push(statement),
+            None => self.density_function.body.push(statement),
+        }
+    }
+
+    pub fn add_variable(&mut self, variable: Rc<Variable>) {
+        match &mut self.function {
+            Some(func) => func.variables.push(variable),
+            None => self.density_function.variables.push(variable),
+        }
+    }
+
+    fn take_bs(&mut self) -> (DensityFunctionCache<'a, 'm>, NoiseCache<'a, 'm>) {
+        let BuilderState {
+            density_function_cache,
+            noise_cache,
+        } = self
+            .builder_state
+            .take()
+            .expect("Builder state is not initialized");
+        (density_function_cache, noise_cache)
+    }
+
+    fn put_bs(
+        &mut self,
+        density_function_cache: DensityFunctionCache<'a, 'm>,
+        noise_cache: NoiseCache<'a, 'm>,
+    ) {
+        self.builder_state = Some(BuilderState {
+            density_function_cache,
+            noise_cache,
+        });
+    }
+
+    pub fn lower_noise(&mut self, density: NormalNoise<'a>) -> DensityFunctionRef<'m> {
+        // lower the noise into a density function
+        let density_function = lower_normal_noise(density, None);
+        let density_function_ref = DensityFunctionRef::new(self.arena.alloc(density_function));
+        density_function_ref
+    }
+
+    pub fn lower_noise_and_mark(&mut self, density: NormalNoise<'a>) -> DensityInput<'m> {
+        // check if we already have a density function for this noise
+        if let Some(cached) = self.noise_inputs.get(&density) {
+            return cached.clone();
+        }
+
+        // borrow the caches from the builder state
+        let (density_function_cache, mut noise_cache) = self.take_bs();
+        // lower the noise into a density function
+        let density_function_ref = if let Some(cached) = noise_cache.get(&density) {
+            cached.clone()
+        } else {
+            let density_function = lower_normal_noise(density, None);
+            let density_function_ref = DensityFunctionRef::new(self.arena.alloc(density_function));
+            noise_cache.insert(density, density_function_ref.clone());
+            density_function_ref
+        };
+        let v = anonvar(VariableType::DensityInput);
+        let input = DensityInput {
+            var: v.clone(),
+            density_function: density_function_ref.clone(),
+        };
+
+        self.noise_inputs.insert(density, input.clone());
+        self.density_function.density_inputs.push(input.clone());
+        if let Some(func) = &mut self.function {
+            func.variables.push(v);
+        }
+
+        // return the density input, and put back the caches into the builder state
+        self.put_bs(density_function_cache, noise_cache);
+        input
+    }
+
+    pub fn lower_density_input(
+        &mut self,
+        density: Density<'a>,
+        canonical_name: Option<String>,
+    ) -> DensityInput<'m> {
+        // check if we already have a density function for this density
+        if let Some(cached) = self.density_function_inputs.get(&density) {
+            return cached.clone();
+        }
+
+        // borrow the caches from the builder state
+        let (mut density_function_cache, mut noise_cache) = self.take_bs();
+        // lower the noise into a density function
+        let density_function_ref = if let Some(cached) = density_function_cache.get(&density) {
+            cached.clone()
+        } else {
+            // lower the density into an expression
+            // create a new builder to build the density function
+            let mut builder = DensityBuilder::new_named(
+                self.arena,
+                BuilderState {
+                    density_function_cache: density_function_cache,
+                    noise_cache: noise_cache,
+                },
+                canonical_name,
+            );
+            let r = builder.lower_density(density);
+            let (density_function, helpers, bs) = builder.finish(r);
+            self.helper_functions.extend(helpers);
+            (density_function_cache, noise_cache) = (bs.density_function_cache, bs.noise_cache);
+
+            let density_function_ref = DensityFunctionRef::new(self.arena.alloc(density_function));
+            density_function_cache.insert(density, density_function_ref.clone());
+            density_function_ref
+        };
+        let v = anonvar(VariableType::DensityInput);
+        let input = DensityInput {
+            var: v.clone(),
+            density_function: density_function_ref.clone(),
+        };
+
+        self.density_function_inputs.insert(density, input.clone());
+        self.density_function.density_inputs.push(input.clone());
+        if let Some(func) = &mut self.function {
+            func.variables.push(v);
+        }
+
+        // return the density input, and put back the caches into the builder state
+        self.put_bs(density_function_cache, noise_cache);
+        input
+    }
+
+    pub fn lower_density(&mut self, density: Density<'a>) -> Expression<'m> {
+        match *density {
+            DensityType::Noise(noise) => {
+                // A noise call specifically
+                let fref = self.lower_noise_and_mark(noise);
+                // use the density input as the expression
+                Expression::DensityVariable(fref)
+            }
+            DensityType::Const(v) => Expression::Literal(v as f64),
+            DensityType::Add { left, right } => {
+                let left = self.lower_density(left);
+                let right = self.lower_density(right);
+                Expression::BinaryOp {
+                    op: BinaryOperator::Add,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                }
+            }
+            DensityType::Multiply { left, right } => {
+                let left = self.lower_density(left);
+                let right = self.lower_density(right);
+                Expression::BinaryOp {
+                    op: BinaryOperator::Multiply,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                }
+            }
+            DensityType::Cache2d { argument } => {
+                // do nothing for now, just lower the argument
+                // eventually we might want to mark this as a special function call, so that we can do some caching later on
+                self.lower_density(argument)
+            }
+            DensityType::Squeeze { argument } => {
+                /*
+                x = clamp(argument, -1, 1)
+                result = x/2 - x*x*x/24
+                return result
+                */
+                let xv = anonvar(VariableType::F32);
+                let arg_expr = self.lower_density(argument);
+                self.add_statement(Statement::Assign {
+                    target: xv.clone(),
+                    value: make_clamp(arg_expr, -1.0, 1.0),
+                });
+                let result = Expression::BinaryOp {
+                    op: BinaryOperator::Subtract,
+                    left: Box::new(Expression::BinaryOp {
+                        op: BinaryOperator::Multiply,
+                        left: Box::new(Expression::Variable(xv.clone())),
+                        right: Box::new(Expression::Literal(0.5)),
+                    }),
+                    right: Box::new(Expression::BinaryOp {
+                        op: BinaryOperator::Multiply,
+                        left: Box::new(Expression::BinaryOp {
+                            op: BinaryOperator::Multiply,
+                            left: Box::new(Expression::Variable(xv.clone())),
+                            right: Box::new(Expression::Variable(xv.clone())),
+                        }),
+                        right: Box::new(Expression::Literal(1.0 / 24.0)),
+                    }),
+                };
+                let result_var = anonvar(VariableType::F32);
+                self.add_statement(Statement::Assign {
+                    target: result_var.clone(),
+                    value: result,
+                });
+                Expression::Variable(result_var)
+            }
+            DensityType::Interpolated { argument } => {
+                // TODO: another optimization
+                // skip for now
+                self.lower_density(argument)
+            }
+            DensityType::EndIslands => {
+                // this is a special density function that doesn't take any arguments, it just marks the end of island generation
+                // for now we can just return 0, since this density function is only used in a condition to check if we should generate an island or not
+                Expression::Literal(0.0)
+            }
+            DensityType::YClampedGradient {
+                from_y,
+                to_y,
+                from_value,
+                to_value,
+            } => {
+                // 1. Access p.y
+                let p_var = Expression::Variable(self.p.clone());
+
+                let y_expr = Expression::Field {
+                    base: Box::new(p_var),
+                    field: "y".to_string(),
+                };
+
+                // 2. clamp(p.y, from_y, to_y)
+                let clamped_expr = Expression::ExternCall {
+                    function_name: "clamp".to_string(),
+                    parameters: vec![
+                        y_expr,
+                        Expression::Literal(from_y),
+                        Expression::Literal(to_y),
+                    ],
+                };
+
+                // 3. Create clampedY variable
+                let clamped_y = anonvar(VariableType::F32);
+                self.add_variable(clamped_y.clone());
+
+                self.add_statement(Statement::Assign {
+                    target: clamped_y.clone(),
+                    value: clamped_expr,
+                });
+
+                // ---- Build linear mapping ----
+
+                // (clampedY - from_y)
+                let numerator = Expression::BinaryOp {
+                    op: BinaryOperator::Subtract,
+                    left: Box::new(Expression::Variable(clamped_y.clone())),
+                    right: Box::new(Expression::Literal(from_y)),
+                };
+
+                // (to_y - from_y)
+                let denominator = Expression::BinaryOp {
+                    op: BinaryOperator::Subtract,
+                    left: Box::new(Expression::Literal(to_y)),
+                    right: Box::new(Expression::Literal(from_y)),
+                };
+
+                // (clampedY - from_y) / (to_y - from_y)
+                let normalized = Expression::BinaryOp {
+                    op: BinaryOperator::Divide,
+                    left: Box::new(numerator),
+                    right: Box::new(denominator),
+                };
+
+                // (to_value - from_value)
+                let value_range = Expression::BinaryOp {
+                    op: BinaryOperator::Subtract,
+                    left: Box::new(Expression::Literal(to_value)),
+                    right: Box::new(Expression::Literal(from_value)),
+                };
+
+                // normalized * value_range
+                let scaled = Expression::BinaryOp {
+                    op: BinaryOperator::Multiply,
+                    left: Box::new(normalized),
+                    right: Box::new(value_range),
+                };
+
+                // + from_value
+                Expression::BinaryOp {
+                    op: BinaryOperator::Add,
+                    left: Box::new(scaled),
+                    right: Box::new(Expression::Literal(from_value)),
+                }
+            }
+            DensityType::FlatCache { argument } => {
+                // another caching function, for now just ignore the caching and lower the argument
+                // TODO: implement caching
+                if let Some(cached) = self.density_function_inputs.get(&density) {
+                    return Expression::DensityVariable(cached.clone());
+                }
+
+                // flat caches are always lowered as separate density functions
+                let input = self.lower_density_input(argument, None);
+                // add to cache
+                self.density_function_inputs.insert(density, input.clone());
+                // return the density variable for the input
+                Expression::DensityVariable(input)
+            }
+            DensityType::NamedDensityReference { argument, name } => {
+                // another caching function, for now just ignore the caching and lower the argument
+                // TODO: implement caching
+                if let Some(cached) = self.density_function_inputs.get(&density) {
+                    return Expression::DensityVariable(cached.clone());
+                }
+                let name = name.clone();
+                // flat caches are always lowered as separate density functions
+                let input = self.lower_density_input(argument, Some(name));
+                // add to cache
+                self.density_function_inputs.insert(density, input.clone());
+                // return the density variable for the input
+                Expression::DensityVariable(input)
+            }
+            DensityType::OldBlendedNoise {
+                smear_scale_multiplier,
+                xz_factor,
+                xz_scale,
+                y_factor,
+                y_scale,
+            } => {
+                // old noise function, used in 1.18 and earlier
+                // for now call an extern function by the same name
+                Expression::ExternCall {
+                    function_name: "old_blended_noise".into(),
+                    parameters: vec![
+                        Expression::Variable(self.p.clone()),
+                        Expression::Literal(smear_scale_multiplier),
+                        Expression::Literal(xz_factor),
+                        Expression::Literal(xz_scale),
+                        Expression::Literal(y_factor),
+                        Expression::Literal(y_scale),
+                    ],
+                }
+            }
+            DensityType::ShiftedNoise {
+                noise,
+                shift_x,
+                shift_y,
+                shift_z,
+                xz_scale,
+                y_scale,
+            } => {
+                // 1. Lower shift densities
+                let shift_x_expr = self.lower_density(shift_x);
+                let shift_y_expr = Expression::Literal(shift_y); // shift_y is f64 constant
+                let shift_z_expr = self.lower_density(shift_z);
+
+                // 2. Build vec3(shiftX, shiftY, shiftZ)
+                let shift_vec = Expression::MakeVec3 {
+                    x: Box::new(shift_x_expr),
+                    y: Box::new(shift_y_expr),
+                    z: Box::new(shift_z_expr),
+                };
+
+                // 3. p + shift_vec
+                let shifted_position = Expression::BinaryOp {
+                    op: BinaryOperator::Add,
+                    left: Box::new(Expression::Variable(self.p.clone())),
+                    right: Box::new(shift_vec),
+                };
+
+                // 4. Lower noise but don't mark it, we just want the density function reference
+                let noise_density_function_ref = self.lower_noise(noise);
+
+                Expression::DensityFunctionCall {
+                    function: noise_density_function_ref,
+                    position: shifted_position.into(),
+                }
+            }
+            DensityType::ShiftA { argument } => {
+                // Samples a noise at (x/4, 0, z/4), then multiplies it by 4.
+                let shift_vec = Expression::MakeVec3 {
+                    x: Box::new(Expression::BinaryOp {
+                        op: BinaryOperator::Divide,
+                        left: Box::new(Expression::Field {
+                            base: Box::new(Expression::Variable(self.p.clone())),
+                            field: "x".to_string(),
+                        }),
+                        right: Box::new(Expression::Literal(4.0)),
+                    }),
+                    y: Box::new(Expression::Literal(0.0)),
+                    z: Box::new(Expression::BinaryOp {
+                        op: BinaryOperator::Divide,
+                        left: Box::new(Expression::Field {
+                            base: Box::new(Expression::Variable(self.p.clone())),
+                            field: "z".to_string(),
+                        }),
+                        right: Box::new(Expression::Literal(4.0)),
+                    }),
+                };
+
+                // create a new builder to build the argument density, we just want to lower the argument density to get the density function reference, we don't care about the body or variables of the builder
+                let bs = self.builder_state.take().unwrap();
+                let mut argument_builder = DensityBuilder::new(self.arena, bs);
+                let r = argument_builder.lower_density(argument);
+                let (argument_density_function, helpers, bs) = argument_builder.finish(r);
+                self.builder_state = Some(bs);
+                self.helper_functions.extend(helpers);
+                let argument_density_function_ref =
+                    DensityFunctionRef::new(self.arena.alloc(argument_density_function));
+
+                let call = Expression::DensityFunctionCall {
+                    function: argument_density_function_ref,
+                    position: shift_vec.into(),
+                };
+                // multiply the result by 4
+                Expression::BinaryOp {
+                    op: BinaryOperator::Multiply,
+                    left: Box::new(call),
+                    right: Box::new(Expression::Literal(4.0)),
+                }
+            }
+            DensityType::ShiftB { argument } => {
+                // Samples a noise at (x/4, y/4, 0), then multiplies it by 4.
+                let shift_vec = Expression::MakeVec3 {
+                    x: Box::new(Expression::BinaryOp {
+                        op: BinaryOperator::Divide,
+                        left: Box::new(Expression::Field {
+                            base: Box::new(Expression::Variable(self.p.clone())),
+                            field: "x".to_string(),
+                        }),
+                        right: Box::new(Expression::Literal(4.0)),
+                    }),
+                    y: Box::new(Expression::BinaryOp {
+                        op: BinaryOperator::Divide,
+                        left: Box::new(Expression::Field {
+                            base: Box::new(Expression::Variable(self.p.clone())),
+                            field: "y".to_string(),
+                        }),
+                        right: Box::new(Expression::Literal(4.0)),
+                    }),
+                    z: Box::new(Expression::Literal(0.0)),
+                };
+
+                // create a new builder to build the argument density, we just want to lower the argument density to get the density function reference, we don't care about the body or variables of the builder
+                let bs = self.builder_state.take().unwrap();
+                let mut argument_builder = DensityBuilder::new(self.arena, bs);
+                let r = argument_builder.lower_density(argument);
+                let (argument_density_function, helpers, bs) = argument_builder.finish(r);
+                self.builder_state = Some(bs);
+                self.helper_functions.extend(helpers);
+                let argument_density_function_ref =
+                    DensityFunctionRef::new(self.arena.alloc(argument_density_function));
+
+                let call = Expression::DensityFunctionCall {
+                    function: argument_density_function_ref,
+                    position: shift_vec.into(),
+                };
+                // multiply the result by 4
+                Expression::BinaryOp {
+                    op: BinaryOperator::Multiply,
+                    left: Box::new(call),
+                    right: Box::new(Expression::Literal(4.0)),
+                }
+            }
+            DensityType::CacheOnce { argument } => {
+                // another caching function, for now just ignore the caching and lower the argument
+                self.lower_density(argument)
+            }
+            DensityType::Spline { spline } => {
+                let f = self.lower_spline_definition(spline, None);
+                let fref = self.arena.alloc(f);
+                let fref = FunctionRef::new(fref);
+                Expression::FunctionCall {
+                    function: fref,
+                    parameters: vec![Expression::Variable(self.p.clone())],
+                }
+            }
+            DensityType::Abs { argument } => {
+                let arg_expr = self.lower_density(argument);
+                Expression::ExternCall {
+                    function_name: "abs".into(),
+                    parameters: vec![arg_expr],
+                }
+            }
+            DensityType::Min { left, right } => {
+                let left_expr = self.lower_density(left);
+                let right_expr = self.lower_density(right);
+                Expression::ExternCall {
+                    function_name: "min".into(),
+                    parameters: vec![left_expr, right_expr],
+                }
+            }
+            DensityType::Max { left, right } => {
+                let left_expr = self.lower_density(left);
+                let right_expr = self.lower_density(right);
+                Expression::ExternCall {
+                    function_name: "max".into(),
+                    parameters: vec![left_expr, right_expr],
+                }
+            }
+            DensityType::RangeChoice {
+                input,
+                min_inclusive,
+                max_exclusive,
+                when_in_range,
+                when_out_of_range,
+            } => {
+                let input = self.lower_density(input);
+                let in_range_expr = self.lower_density(when_in_range);
+                let out_of_range_expr = self.lower_density(when_out_of_range);
+
+                let v = anonvar(VariableType::F32);
+                self.add_variable(v.clone());
+                self.add_statement(Statement::Assign {
+                    target: v.clone(),
+                    value: input.clone(),
+                });
+
+                let condition = Expression::BinaryOp {
+                    op: BinaryOperator::And,
+                    left: Box::new(Expression::BinaryOp {
+                        op: BinaryOperator::GreaterEqual,
+                        left: Box::new(Expression::Variable(v.clone())),
+                        right: Box::new(Expression::Literal(min_inclusive)),
+                    }),
+                    right: Box::new(Expression::BinaryOp {
+                        op: BinaryOperator::Less,
+                        left: Box::new(Expression::Variable(v.clone())),
+                        right: Box::new(Expression::Literal(max_exclusive)),
+                    }),
+                };
+
+                let v = anonvar(VariableType::F32);
+                self.add_variable(v.clone());
+                self.add_statement(Statement::If {
+                    condition,
+                    then_branch: vec![Statement::Assign {
+                        target: v.clone(),
+                        value: in_range_expr,
+                    }],
+                    else_branch: vec![Statement::Assign {
+                        target: v.clone(),
+                        value: out_of_range_expr,
+                    }],
+                });
+
+                Expression::Variable(v)
+            }
+            DensityType::Clamp { input, min, max } => {
+                let input = self.lower_density(input);
+                make_clamp(input, min, max)
+            }
+            DensityType::WeirdScaledSampler {
+                input,
+                noise_to_sample,
+                ref rarity_value_mapper,
+            } => {
+                // TODO: implement this
+                // for now just lower the input density and ignore the weird sampling
+                self.lower_density(input)
+            }
+            DensityType::Square { argument } => {
+                let v = anonvar(VariableType::F32);
+                let arg_expr = self.lower_density(argument);
+                self.add_variable(v.clone());
+                self.add_statement(Statement::Assign {
+                    target: v.clone(),
+                    value: arg_expr,
+                });
+                Expression::BinaryOp {
+                    op: BinaryOperator::Multiply,
+                    left: Box::new(Expression::Variable(v.clone())),
+                    right: Box::new(Expression::Variable(v.clone())),
+                }
+            }
+            DensityType::Cube { argument } => {
+                let v = anonvar(VariableType::F32);
+                let arg_expr = self.lower_density(argument);
+                self.add_variable(v.clone());
+                self.add_statement(Statement::Assign {
+                    target: v.clone(),
+                    value: arg_expr,
+                });
+                Expression::BinaryOp {
+                    op: BinaryOperator::Multiply,
+                    left: Box::new(Expression::Variable(v.clone())),
+                    right: Box::new(Expression::BinaryOp {
+                        op: BinaryOperator::Multiply,
+                        left: Box::new(Expression::Variable(v.clone())),
+                        right: Box::new(Expression::Variable(v.clone())),
+                    }),
+                }
+            }
+        }
+    }
+}
+
+pub fn make_clamp(input: Expression, min: f64, max: f64) -> Expression {
+    // clamp(x, min, max) = max(min, min(x, max))
+    // Expression::BinaryOp {
+    //     op: BinaryOperator::Max,
+    //     left: Box::new(Expression::Literal(min)),
+    //     right: Box::new(Expression::BinaryOp {
+    //         op: BinaryOperator::Min,
+    //         left: Box::new(input),
+    //         right: Box::new(Expression::Literal(max)),
+    //     }),
+    // }
+    Expression::ExternCall {
+        function_name: "clamp".into(),
+        parameters: vec![input, Expression::Literal(min), Expression::Literal(max)],
+    }
+}

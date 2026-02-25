@@ -1,0 +1,17 @@
+[package]
+name = "tungsten-wg"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bumpalo = "3.19.0"
+serde = {version = "1.0.219", features = ["derive"]}
+serde_json = "1.0.143"
+wgpu = { version = "0.20", features = ["glsl", "naga", "spirv"] }
+pollster = "0.3"
+bytemuck = { version = "1.15", features = ["derive"] }
+vulkano = "0.34"
+vulkano-shaders = "0.34"
+vulkano-util = "0.34"
+pest = "2.8.4"
+pest_derive = "2.8.4"
