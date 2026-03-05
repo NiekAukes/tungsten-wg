@@ -23,7 +23,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
             variables: Vec::new(),
         };
 
-        let p = newvar("p", VariableType::Vec3);
+        let p = newvar("p", VariableType::Pos3);
         function.parameters.push(p.clone());
 
         // Compute coordinate
@@ -71,7 +71,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         let cond = Expression::BinaryOp {
             op: BinaryOperator::Less,
             left: Box::new(Expression::Variable(input.clone())),
-            right: Box::new(Expression::Literal(second.location)),
+            right: Box::new(Expression::Float(second.location)),
         };
 
         let mut then_branch = Vec::new();
@@ -92,7 +92,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         p: &std::rc::Rc<Variable>,
     ) -> Expression<'m> {
         match value {
-            SplineValue::Const(c) => Expression::Literal(*c),
+            SplineValue::Const(c) => Expression::Float(*c),
 
             SplineValue::Spline(def) => {
                 // recursive spline -> generate nested function call
@@ -120,9 +120,9 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                 left: Box::new(Expression::BinaryOp {
                     op: BinaryOperator::Subtract,
                     left: Box::new(Expression::Variable(input.clone())),
-                    right: Box::new(Expression::Literal(point.location)),
+                    right: Box::new(Expression::Float(point.location)),
                 }),
-                right: Box::new(Expression::Literal(point.derivative)),
+                right: Box::new(Expression::Float(point.derivative)),
             }),
             right: Box::new(self.lower_spline_value_expr(&point.value, p)),
         }
@@ -140,12 +140,12 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Subtract,
                 left: Box::new(Expression::Variable(input.clone())),
-                right: Box::new(Expression::Literal(first.location)),
+                right: Box::new(Expression::Float(first.location)),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Subtract,
-                left: Box::new(Expression::Literal(second.location)),
-                right: Box::new(Expression::Literal(first.location)),
+                left: Box::new(Expression::Float(second.location)),
+                right: Box::new(Expression::Float(first.location)),
             }),
         };
 
@@ -158,8 +158,8 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                 t,
                 f,
                 s,
-                Expression::Literal(first.derivative),
-                Expression::Literal(second.derivative),
+                Expression::Float(first.derivative),
+                Expression::Float(second.derivative),
             ],
         })
     }

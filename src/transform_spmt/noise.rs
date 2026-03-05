@@ -8,7 +8,7 @@ use crate::{
     transform_spmt::newvar,
 };
 
-pub fn lower_normal_noise<'m>(noise: NormalNoise, cname: Option<String>) -> DensityFunction<'m> {
+pub fn lower_normal_noise<'m>(noise: NormalNoise, cname: Option<String>) -> Function<'m> {
     let mut variables = Vec::new();
     let mut body = Vec::new();
 
@@ -27,8 +27,8 @@ pub fn lower_normal_noise<'m>(noise: NormalNoise, cname: Option<String>) -> Dens
         value: Expression::ExternCall {
             function_name: "pow".into(),
             parameters: vec![
-                Expression::Literal(2.0),
-                Expression::Literal(noise.first_octave as f64),
+                Expression::Float(2.0),
+                Expression::Float(noise.first_octave as f64),
             ],
         },
     });
@@ -49,7 +49,7 @@ pub fn lower_normal_noise<'m>(noise: NormalNoise, cname: Option<String>) -> Dens
             value: Expression::BinaryOp {
                 op: BinaryOperator::Multiply,
                 left: Box::new(Expression::Variable(prev.clone())),
-                right: Box::new(Expression::Literal(2.0)),
+                right: Box::new(Expression::Float(2.0)),
             },
         });
 
@@ -79,7 +79,7 @@ pub fn lower_normal_noise<'m>(noise: NormalNoise, cname: Option<String>) -> Dens
         let scaled_noise = Expression::BinaryOp {
             op: BinaryOperator::Multiply,
             left: Box::new(perlin),
-            right: Box::new(Expression::Literal(*amp)),
+            right: Box::new(Expression::Float(*amp)),
         };
 
         body.push(Statement::Assign {
@@ -105,10 +105,11 @@ pub fn lower_normal_noise<'m>(noise: NormalNoise, cname: Option<String>) -> Dens
 
     body.push(Statement::Return(sum));
 
-    DensityFunction {
+    Function {
         canonical_name: None,
-        density_inputs: vec![],
-        helper_functions: vec![],
+        //density_inputs: vec![],
+        //helper_functions: vec![],
+        parameters: vec![p],
         body,
         variables,
     }

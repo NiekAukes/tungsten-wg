@@ -45,6 +45,8 @@ pub type FunctionRef<'m> = Interned<'m, Function<'m>>;
 pub struct DensityInput<'m> {
     pub var: Rc<Variable>,
     pub density_function: DensityFunctionRef<'m>,
+    pub scaled_origin: (f32, f32, f32),
+    pub dimensions: (i32, i32, i32),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -57,6 +59,7 @@ pub struct Variable {
 pub enum VariableType {
     DensityInput,
     Vec3,
+    Pos3,
     F32,
     I32,
 }
@@ -66,6 +69,7 @@ impl Debug for VariableType {
         match self {
             VariableType::DensityInput => write!(f, "density"),
             VariableType::Vec3 => write!(f, "vec3"),
+            VariableType::Pos3 => write!(f, "pos3"),
             VariableType::F32 => write!(f, "f32"),
             VariableType::I32 => write!(f, "i32"),
         }
@@ -92,22 +96,25 @@ pub enum Statement<'m> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression<'m> {
+    /// A variable reference
     Variable(Rc<Variable>),
-    Literal(f64),
+    /// A literal value (e.g. number)
+    Float(f64),
+    Int(i32),
+    /// A Function call: function(parameters...)
     FunctionCall {
         function: FunctionRef<'m>,
         parameters: Vec<Expression<'m>>,
     },
+    /// A Named function call: function_name(parameters...)
+    /// Useful for calling helper functions such as math functions (e.g. sin, cos, etc.)
     ExternCall {
         function_name: String,
         parameters: Vec<Expression<'m>>,
     },
+    /// A 'call' to another density function, with the given parameters.
+    /// This is used to call other density functions from within a density function.
     DensityVariable(DensityInput<'m>),
-
-    DensityFunctionCall {
-        function: DensityFunctionRef<'m>,
-        position: Box<Expression<'m>>,
-    },
 
     BinaryOp {
         op: BinaryOperator,
@@ -125,10 +132,14 @@ pub enum Expression<'m> {
         field: String,
     },
 
-    MakeVec3 {
-        x: Box<Expression<'m>>,
-        y: Box<Expression<'m>>,
-        z: Box<Expression<'m>>,
+    // MakeVec3 {
+    //     x: Box<Expression<'m>>,
+    //     y: Box<Expression<'m>>,
+    //     z: Box<Expression<'m>>,
+    // },
+    Construct {
+        t: VariableType,
+        args: Vec<Expression<'m>>,
     },
 }
 

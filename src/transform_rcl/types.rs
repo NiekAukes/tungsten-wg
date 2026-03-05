@@ -1,0 +1,42 @@
+/*
+Type conversion utilities for translating SPMT types to RCL types.
+*/
+
+use crate::rcl::model as rcl;
+use crate::spmt::model as spmt;
+
+/// Convert an SPMT variable type to an RCL type
+pub fn convert_type(t: &spmt::VariableType) -> rcl::Type {
+    match t {
+        spmt::VariableType::DensityInput => rcl::Type::F32,
+        spmt::VariableType::Vec3 => rcl::Type::Struct("Vec3".to_string()),
+        spmt::VariableType::Pos3 => rcl::Type::Struct("Pos3".to_string()),
+        spmt::VariableType::F32 => rcl::Type::F32,
+        spmt::VariableType::I32 => rcl::Type::I32,
+    }
+}
+
+/// Convert an SPMT binary operator to an RCL binary operator
+pub fn convert_binary_op(op: spmt::BinaryOperator) -> rcl::BinaryOperator {
+    match op {
+        spmt::BinaryOperator::Add => rcl::BinaryOperator::Add,
+        spmt::BinaryOperator::Subtract => rcl::BinaryOperator::Subtract,
+        spmt::BinaryOperator::Multiply => rcl::BinaryOperator::Multiply,
+        spmt::BinaryOperator::Divide => rcl::BinaryOperator::Divide,
+        spmt::BinaryOperator::Equal => rcl::BinaryOperator::Equal,
+        spmt::BinaryOperator::NotEqual => rcl::BinaryOperator::NotEqual,
+        spmt::BinaryOperator::Less => rcl::BinaryOperator::Less,
+        spmt::BinaryOperator::LessEqual => rcl::BinaryOperator::LessEqual,
+        spmt::BinaryOperator::Greater => rcl::BinaryOperator::Greater,
+        spmt::BinaryOperator::GreaterEqual => rcl::BinaryOperator::GreaterEqual,
+        spmt::BinaryOperator::And => rcl::BinaryOperator::And,
+        spmt::BinaryOperator::Or => rcl::BinaryOperator::Or,
+    }
+}
+
+/// Convert an SPMT unary operator to an RCL unary operator
+pub fn convert_unary_op(op: spmt::UnaryOperator) -> rcl::UnaryOperator {
+    match op {
+        spmt::UnaryOperator::Negate => rcl::UnaryOperator::Negate,
+    }
+}

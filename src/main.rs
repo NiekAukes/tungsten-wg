@@ -1,11 +1,14 @@
-use std::env;
+use std::{collections::HashMap, env};
 
 use serde::de;
 
-use crate::spmt::{
-    dag::DensityDAG,
-    model::{Addr, DensityFunctionRef},
-    pretty::PrettyPrint,
+use crate::{
+    rcl::codegen::RustCodeGenerator,
+    spmt::{
+        dag::DensityDAG,
+        model::{Addr, DensityFunctionRef},
+        pretty::PrettyPrint,
+    },
 };
 
 pub mod config_load;
@@ -19,6 +22,9 @@ pub mod tungsten_parse;
 pub mod orchestrate;
 
 pub mod transform_spmt;
+
+pub mod rcl;
+pub mod transform_rcl;
 
 pub fn main() {
     let mut data = config_load::MinecraftDataRaw::new();
@@ -41,7 +47,7 @@ pub fn main() {
     );
 
     let transform_arena = bumpalo::Bump::with_capacity(1 * 1024 * 1024); // 1 MB initial capacity
-    let transformer = transform_spmt::Transformer::new(&transform_arena);
+    let transformer = transform_spmt::Transformer::new(&transform_arena, (16, 256, 16));
     //println!("noise seetings keys: {:?}", mcdata.noise_settings.keys());
     let noise_generator = mcdata.noise_settings.get("minecraft:overworld").unwrap();
     let program = transformer.transform(noise_generator);
@@ -133,7 +139,7 @@ pub fn main() {
 
     // transform to orchestration
     let orchestration_arena = bumpalo::Bump::new();
-    let orchestration = orchestrate::transform::transform_from_spmt(program, &orchestration_arena);
+    let orchestration = orchestrate::transform::transform_from_spmt(&program, &orchestration_arena);
 
     let mut printer = spmt::pretty::Printer::new();
     orchestration.pretty_wave_graph(&mut printer);
@@ -145,19 +151,35 @@ pub fn main() {
     let orchestration_output = printer.finish();
     std::fs::write("wave_dependencies.dot", orchestration_output).expect("Unable to write file");
 
-    //println!("Transformed SPMT: {}", printer.finish());
+    // convert one of the density functions to RCL
+    // let rcl_arena = bumpalo::Bump::new();
+    // let mut rcl_model = rcl::RCL::new();
+    // let density_function = program.density_functions.first().unwrap();
+    // transform_rcl::add_density_to_rcl_model(&mut rcl_model, density_function, &rcl_arena);
 
-    //let spv = SHADER_SOURCE.to_vec();
-    //env_logger::init();
+    // convert all density functions to RCL and add them to the model
+    let rcl_arena = bumpalo::Bump::new();
+    let mut rcl_model = rcl::RCL::new();
+    let mut already_converted_functions = HashMap::new();
+    for density_function in &program.density_functions {
+        let c = transform_rcl::add_density_to_rcl_model(
+            &mut rcl_model,
+            density_function,
+            &rcl_arena,
+            already_converted_functions,
+        );
+        already_converted_functions = c.already_converted_functions;
+    }
 
-    // println!("SPIR-V length: {}", SHADER_SOURCE.len());
-    // let results = gpu_eval::doit(SHADER_SOURCE).unwrap();
-    // println!("Results length: {}", results.len());
-    // println!("First 10 results: {:?}", &results[..100]);
+    // write the RCL functions to a file in a different folder
+    let folder = "../rcl_density";
+    // generate the
 
-    // let tung = "src/tungsten_parse/test.w";
-    // let parsed = tungsten_parse::parse_tungsten(tung).unwrap();
-    // println!("Parsed Tungsten file: {:?}", parsed);
+    let rust_cg = RustCodeGenerator::new();
+    //println!("RCL Model: {:?}", rcl_model);
+    let rcl_output = rust_cg.generate_module(&rcl_model);
+    std::fs::write(format!("{}/src/density_function.rs", folder), rcl_output)
+        .expect("Unable to write file");
 }
 
 #[cfg(test)]

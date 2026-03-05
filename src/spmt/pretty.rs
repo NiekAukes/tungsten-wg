@@ -247,8 +247,11 @@ impl<'m> PrettyPrint for Expression<'m> {
                 let name = v.name.clone().unwrap_or(p.anon_name(v.clone(), "var"));
                 p.push(&name);
             }
-            Expression::Literal(v) => {
+            Expression::Float(v) => {
                 write!(p.line, "{:.6}", v).unwrap();
+            }
+            Expression::Int(v) => {
+                write!(p.line, "{}", v).unwrap();
             }
             Expression::FunctionCall {
                 function,
@@ -327,23 +330,6 @@ impl<'m> PrettyPrint for Expression<'m> {
                 let name = p.anon_name(density_input.density_function, "density-function");
                 p.push(&name);
             }
-            Expression::DensityFunctionCall { function, position } => {
-                // let name = function
-                //     .canonical_name
-                //     .as_deref()
-                //     .unwrap_or_else(|| p.get_anon_name(function))
-                //     .to_string();
-                let name = if let Some(name) = function.canonical_name.as_deref() {
-                    name.to_string()
-                } else {
-                    p.anon_name(*function, "density-function")
-                };
-
-                p.push(&name);
-                p.push("(");
-                position.pretty(p);
-                p.push(")");
-            }
             Expression::UnaryOp { op, operand } => {
                 p.push(match op {
                     crate::spmt::model::UnaryOperator::Negate => "-",
@@ -355,13 +341,23 @@ impl<'m> PrettyPrint for Expression<'m> {
                 p.push(".");
                 p.push(field);
             }
-            Expression::MakeVec3 { x, y, z } => {
-                p.push("vec3(");
-                x.pretty(p);
-                p.push(", ");
-                y.pretty(p);
-                p.push(", ");
-                z.pretty(p);
+            // Expression::MakeVec3 { x, y, z } => {
+            //     p.push("vec3(");
+            //     x.pretty(p);
+            //     p.push(", ");
+            //     y.pretty(p);
+            //     p.push(", ");
+            //     z.pretty(p);
+            //     p.push(")");
+            // }
+            Expression::Construct { t, args } => {
+                p.push(&format!("{:?}(", t));
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        p.push(", ");
+                    }
+                    arg.pretty(p);
+                }
                 p.push(")");
             }
         }

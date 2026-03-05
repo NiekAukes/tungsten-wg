@@ -11,7 +11,7 @@ pub mod noise;
 pub mod spline;
 
 fn lit(v: f64) -> Expression<'static> {
-    Expression::Literal(v)
+    Expression::Float(v)
 }
 
 pub fn newvar(name: &str, t: VariableType) -> Rc<Variable> {
@@ -31,6 +31,9 @@ type NoiseCache<'a, 'm> = std::collections::HashMap<NormalNoise<'a>, DensityFunc
 pub struct BuilderState<'a, 'm> {
     pub density_function_cache: DensityFunctionCache<'a, 'm>,
     pub noise_cache: NoiseCache<'a, 'm>,
+
+    working_dimensions: (i32, i32, i32),
+    working_scaled_origin: (f32, f32, f32),
 }
 
 pub struct Transformer<'a, 'm> {
@@ -40,7 +43,7 @@ pub struct Transformer<'a, 'm> {
 }
 
 impl<'a, 'm> Transformer<'a, 'm> {
-    pub fn new(arena: &'m bumpalo::Bump) -> Self {
+    pub fn new(arena: &'m bumpalo::Bump, initial_working_dimensions: (i32, i32, i32)) -> Self {
         Self {
             final_model: SPMT {
                 density_functions: Vec::new(),
@@ -53,6 +56,8 @@ impl<'a, 'm> Transformer<'a, 'm> {
             builder_state: Option::Some(BuilderState {
                 density_function_cache: std::collections::HashMap::new(),
                 noise_cache: std::collections::HashMap::new(),
+                working_dimensions: initial_working_dimensions,
+                working_scaled_origin: (1.0, 1.0, 1.0),
             }),
         }
     }
@@ -73,6 +78,7 @@ impl<'a, 'm> Transformer<'a, 'm> {
         let BuilderState {
             density_function_cache,
             noise_cache,
+            ..
         } = self.builder_state.take().unwrap();
 
         for density_function in density_function_cache.values() {
