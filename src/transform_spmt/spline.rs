@@ -1,5 +1,7 @@
 // transform_spmt/spline.rs
 
+use std::rc::Rc;
+
 use crate::transform_spmt::density::DensityBuilder;
 use crate::transform_spmt::{anonvar, newvar};
 use crate::{
@@ -22,8 +24,10 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
             body: Vec::new(),
             variables: Vec::new(),
         };
-
-        let p = newvar("p", VariableType::Pos3);
+        let p: Rc<Variable> = Rc::new(Variable {
+            name: self.p.name.clone(),
+            t: self.p.t.clone(),
+        });
         function.parameters.push(p.clone());
 
         // Compute coordinate
@@ -160,6 +164,13 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                 s,
                 Expression::Float(first.derivative),
                 Expression::Float(second.derivative),
+            ],
+            parameter_types: vec![
+                VariableType::F32,
+                VariableType::F32,
+                VariableType::F32,
+                VariableType::F32,
+                VariableType::F32,
             ],
         })
     }

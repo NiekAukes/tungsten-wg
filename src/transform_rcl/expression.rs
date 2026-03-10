@@ -6,7 +6,7 @@ variables, binary/unary operations, function calls, and field access.
 
 use std::rc::Rc;
 
-use super::{RCLFunctionConverter, types};
+use super::{RCLFunctionConverter, sanitize_name, types};
 use crate::rcl::{Parameter, model as rcl};
 use crate::spmt::model::{self as spmt, Addr, Interned};
 use crate::transform_rcl::function;
@@ -18,6 +18,7 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
         match expr {
             spmt::Expression::Variable(var) => {
                 let rcl_var = self.get_or_create_variable(var.clone());
+
                 rcl::Expression::Variable(rcl_var)
             }
             spmt::Expression::Float(val) => rcl::Expression::FloatLiteral(*val),
@@ -81,29 +82,38 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
             spmt::Expression::ExternCall {
                 function_name,
                 parameters,
+                parameter_types,
             } => {
                 // not a real extern call, it is simply a function call to a function that is not defined in the SPMT,
                 // so we treat it as a "late bound" function call with the given name and parameters
 
-                let arguments = parameters
-                    .iter()
-                    .map(|p| self.convert_expression(p))
-                    .collect();
+                // let arguments = parameters
+                //     .iter()
+                //     .map(|p| self.convert_expression(p))
+                //     .collect();
+                let mut arguments = vec![];
+                let mut argument_types = vec![];
+                for (i, param) in parameters.iter().enumerate() {
+                    arguments.push(self.convert_argument(param, parameter_types[i]));
+                    argument_types.push(types::convert_type(&parameter_types[i]));
+                }
+
                 rcl::Expression::LateBoundCall {
                     function_name: function_name.clone(),
-                    argument_types: Vec::new(),
+                    argument_types: argument_types,
                     return_type: rcl::Type::F32,
                     arguments,
                 }
             }
             spmt::Expression::DensityVariable(input) => {
-                let onedposition = convert_vec3_to_position_expression(rcl::Expression::Variable(
-                    Rc::new(rcl::Variable {
-                        name: Some("p".to_string()),
+                let onedposition = convert_vec3_to_position_expression(
+                    rcl::Expression::Variable(Rc::new(rcl::Variable {
+                        name: Some("pos3".to_string()),
                         t: rcl::Type::Struct("Pos3".to_string()),
                         mutable: false,
-                    }),
-                ));
+                    })),
+                    input.dimensions,
+                );
 
                 // the function is a density function, which is passed as a
                 // field of f32s, look up the parameter for this density function in the converter's density_function_inputs map
@@ -114,7 +124,7 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
                     .cloned()
                     .unwrap_or(Parameter {
                         name: format!("err_{}", input.density_function.addr() as usize),
-                        t: rcl::Type::Array(Box::new(rcl::Type::F32), 16 * 16 * 256),
+                        t: rcl::Type::ArrayRef(Box::new(rcl::Type::F32), 16 * 16 * 256),
                     });
                 rcl::Expression::Index {
                     base: Box::new(rcl::Expression::Variable(Rc::new(rcl::Variable {
@@ -162,38 +172,80 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
             }
         }
     }
+
+    fn convert_argument(
+        &mut self,
+        arg: &spmt::Expression<'a>,
+        target_type: spmt::VariableType,
+    ) -> rcl::Expression<'m> {
+        let exp = self.convert_expression(arg);
+        // if the target type is f32 and the expression is an int literal, convert it to a float literal
+        let cast = match (target_type, arg) {
+            (spmt::VariableType::F32, spmt::Expression::Float(_)) => exp,
+            (spmt::VariableType::I32, spmt::Expression::Int(_)) => exp,
+            (spmt::VariableType::F32, _) => rcl::Expression::Cast {
+                expr: Box::new(exp),
+                to_type: rcl::Type::F32,
+            },
+            (spmt::VariableType::I32, _) => rcl::Expression::Cast {
+                expr: Box::new(exp),
+                to_type: rcl::Type::I32,
+            },
+            (_, _) => exp, // do nothing
+        };
+        cast
+    }
 }
 
-fn convert_vec3_to_position_expression<'m>(p: rcl::Expression<'m>) -> rcl::Expression<'m> {
-    // simply y * 256 * 16 + z * 256 + x
-    rcl::Expression::BinaryOp {
-        op: rcl::BinaryOperator::Modulo,
-        left: Box::new(rcl::Expression::BinaryOp {
-            op: rcl::BinaryOperator::Add,
-            left: Box::new(rcl::Expression::BinaryOp {
-                op: rcl::BinaryOperator::Add,
-                left: Box::new(rcl::Expression::BinaryOp {
-                    op: rcl::BinaryOperator::Multiply,
-                    left: Box::new(rcl::Expression::Field {
-                        base: Box::new(p.clone()),
-                        field: "y".to_string(),
-                    }),
-                    right: Box::new(rcl::Expression::IntLiteral(256 * 16)),
-                }),
-                right: Box::new(rcl::Expression::BinaryOp {
-                    op: rcl::BinaryOperator::Multiply,
-                    left: Box::new(rcl::Expression::Field {
-                        base: Box::new(p.clone()),
-                        field: "z".to_string(),
-                    }),
-                    right: Box::new(rcl::Expression::IntLiteral(256)),
-                }),
-            }),
-            right: Box::new(rcl::Expression::Field {
-                base: Box::new(p),
-                field: "x".to_string(),
-            }),
-        }),
-        right: Box::new(rcl::Expression::IntLiteral(16 * 256 * 256)),
+fn convert_vec3_to_position_expression<'m>(
+    p: rcl::Expression<'m>,
+    dims: (i32, i32, i32),
+) -> rcl::Expression<'m> {
+    // // simply y * 256 * 16 + z * 256 + x
+    // rcl::Expression::BinaryOp {
+    //     op: rcl::BinaryOperator::Modulo,
+    //     left: Box::new(rcl::Expression::BinaryOp {
+    //         op: rcl::BinaryOperator::Add,
+    //         left: Box::new(rcl::Expression::BinaryOp {
+    //             op: rcl::BinaryOperator::Add,
+    //             left: Box::new(rcl::Expression::BinaryOp {
+    //                 op: rcl::BinaryOperator::Multiply,
+    //                 left: Box::new(rcl::Expression::Field {
+    //                     base: Box::new(p.clone()),
+    //                     field: "y".to_string(),
+    //                 }),
+    //                 right: Box::new(rcl::Expression::IntLiteral(256 * 16)),
+    //             }),
+    //             right: Box::new(rcl::Expression::BinaryOp {
+    //                 op: rcl::BinaryOperator::Multiply,
+    //                 left: Box::new(rcl::Expression::Field {
+    //                     base: Box::new(p.clone()),
+    //                     field: "z".to_string(),
+    //                 }),
+    //                 right: Box::new(rcl::Expression::IntLiteral(256)),
+    //             }),
+    //         }),
+    //         right: Box::new(rcl::Expression::Field {
+    //             base: Box::new(p),
+    //             field: "x".to_string(),
+    //         }),
+    //     }),
+    //     right: Box::new(rcl::Expression::IntLiteral(16 * 256 * 256)),
+    // }
+
+    // new method: as_index(pos3, x, y)
+    rcl::Expression::LateBoundCall {
+        function_name: "as_index".to_string(),
+        argument_types: vec![
+            rcl::Type::Struct("Pos3".to_string()),
+            rcl::Type::I32,
+            rcl::Type::I32,
+        ],
+        return_type: rcl::Type::F32,
+        arguments: vec![
+            p,
+            rcl::Expression::IntLiteral(dims.0 as i64),
+            rcl::Expression::IntLiteral(dims.1 as i64),
+        ],
     }
 }

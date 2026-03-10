@@ -282,6 +282,7 @@ impl<'m> PrettyPrint for Expression<'m> {
             Expression::ExternCall {
                 function_name,
                 parameters,
+                parameter_types: _,
             } => {
                 p.push("extern ");
                 p.push(function_name);

@@ -49,13 +49,13 @@ pub struct DensityInput<'m> {
     pub dimensions: (i32, i32, i32),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Variable {
     pub name: Option<String>,
     pub t: VariableType,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Copy, Eq)]
 pub enum VariableType {
     DensityInput,
     Vec3,
@@ -111,6 +111,7 @@ pub enum Expression<'m> {
     ExternCall {
         function_name: String,
         parameters: Vec<Expression<'m>>,
+        parameter_types: Vec<VariableType>,
     },
     /// A 'call' to another density function, with the given parameters.
     /// This is used to call other density functions from within a density function.
@@ -240,7 +241,8 @@ impl<T> Addr for &T {
 
 impl<T> Addr for std::rc::Rc<T> {
     fn addr(&self) -> *const () {
-        self.as_ref() as *const T as *const ()
+        let ptr: *const T = Rc::as_ptr(self);
+        ptr as *const ()
     }
 }
 

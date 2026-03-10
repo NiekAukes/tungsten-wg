@@ -14,16 +14,6 @@ impl RustCodeGenerator {
         RustCodeGenerator
     }
 
-    /// Sanitize a name to make it a valid Rust identifier
-    /// Replaces `:` and `/` with `_`
-    fn sanitize_name(&self, name: &str) -> String {
-        name.replace(':', "_")
-            .replace('/', "_")
-            .replace('<', "_")
-            .replace('>', "_")
-            .replace('-', "_")
-    }
-
     /// Generate a complete Rust module from RCL
     pub fn generate_module(&self, icl: &icl::RCL<'_>) -> String {
         let mut p = Printer::new();
@@ -42,6 +32,13 @@ impl RustCodeGenerator {
 
         p.line("use crate::math::*;");
         p.line("use crate::utils::*;");
+
+        for import in &icl.import_statements {
+            p.push("use ");
+            p.push(import);
+            p.line(";");
+        }
+
         p.line("");
 
         // Generate struct definitions
@@ -68,13 +65,13 @@ impl RustCodeGenerator {
     /// Generate Rust code for a struct definition
     fn generate_struct(&self, p: &mut Printer, struct_def: &icl::StructRef<'_>) {
         p.push("pub struct ");
-        p.push(&self.sanitize_name(&struct_def.name));
+        p.push(&struct_def.name);
         p.line(" {");
 
         p.indent();
         for (field_name, field_type) in &struct_def.fields {
             p.push("pub ");
-            p.push(&self.sanitize_name(field_name));
+            p.push(field_name);
             p.push(": ");
             p.push(&self.type_to_rust_string(field_type));
             p.line(",");
@@ -95,9 +92,9 @@ impl RustCodeGenerator {
 
         // Handle optional function name
         if let Some(name) = &func.name {
-            p.push(&self.sanitize_name(name));
+            p.push(name);
         } else {
-            let anon_name = self.sanitize_name(&p.anon_name(*func, "func"));
+            let anon_name = sanitize_anon_name(&p.anon_name(*func, "func"));
             p.push(&anon_name);
         }
 
@@ -199,11 +196,18 @@ impl RustCodeGenerator {
 
                 p.line("}");
             }
-            icl::Statement::Declare { variable, init } => {
-                p.push("let mut ");
+            icl::Statement::Declare {
+                variable,
+                init,
+                mutable,
+            } => {
+                p.push("let ");
+                if *mutable {
+                    p.push("mut ");
+                }
                 let var_name = self.variable_to_string(variable, p);
                 p.push(&var_name);
-                p.push(" : ");
+                p.push(": ");
                 p.push(&self.type_to_rust_string(&variable.t));
 
                 if let Some(expr) = init {
@@ -220,9 +224,9 @@ impl RustCodeGenerator {
             } => {
                 // Handle optional function name
                 if let Some(name) = &function.name {
-                    p.push(&self.sanitize_name(name));
+                    p.push(name);
                 } else {
-                    let anon_name = self.sanitize_name(&p.anon_name(*function, "func"));
+                    let anon_name = sanitize_anon_name(&p.anon_name(*function, "func"));
                     p.push(&anon_name);
                 }
 
@@ -246,6 +250,80 @@ impl RustCodeGenerator {
                 }
                 p.dedent();
                 p.line("}");
+            }
+            icl::Statement::For {
+                init,
+                condition,
+                increment,
+                body,
+            } => {
+                p.push("for ");
+                if let Some(init_stmt) = init {
+                    // For loop with initialization
+                    p.push("{ ");
+                    self.generate_statement(p, init_stmt);
+                    p.push(" }");
+                } else {
+                    p.push("; ");
+                }
+
+                if let Some(cond_expr) = condition {
+                    let cond_str = self.expression_to_string_with_printer(p, cond_expr);
+                    p.push(&cond_str);
+                }
+                p.push("; ");
+
+                if let Some(incr_stmt) = increment {
+                    p.push("{ ");
+                    self.generate_statement(p, incr_stmt);
+                    p.push(" }");
+                }
+
+                p.line(" {");
+
+                p.indent();
+                for stmt in body {
+                    self.generate_statement(p, stmt);
+                }
+                p.dedent();
+
+                p.line("}");
+            }
+            icl::Statement::ForIn {
+                variable,
+                iterable,
+                body,
+            } => {
+                p.push("for ");
+                let var_name = self.variable_to_string(variable, p);
+                p.push(&var_name);
+                p.push(" in ");
+                let iterable_str = self.expression_to_string_with_printer(p, iterable);
+                p.push(&iterable_str);
+                p.line(" {");
+
+                p.indent();
+                for stmt in body {
+                    self.generate_statement(p, stmt);
+                }
+                p.dedent();
+
+                p.line("}");
+            }
+            icl::Statement::ArrayAssign {
+                target,
+                index,
+                value,
+            } => {
+                let var_name = self.variable_to_string(target, p);
+                p.push(&var_name);
+                p.push("[");
+                let index_str = self.expression_to_string_with_printer(p, index);
+                p.push(&index_str);
+                p.push("] = ");
+                let value_str = self.expression_to_string_with_printer(p, value);
+                p.push(&value_str);
+                p.line(";");
             }
         }
     }
@@ -285,9 +363,9 @@ impl RustCodeGenerator {
                     .map(|a| self.expression_to_string_with_printer(p, a))
                     .collect();
                 let func_name = if let Some(name) = &function.name {
-                    self.sanitize_name(name)
+                    name.clone()
                 } else {
-                    self.sanitize_name(&p.anon_name(*function, "func"))
+                    sanitize_anon_name(&p.anon_name(*function, "func"))
                 };
                 format!("{}({})", func_name, args.join(", "))
             }
@@ -300,13 +378,13 @@ impl RustCodeGenerator {
                     .iter()
                     .map(|a| self.expression_to_string_with_printer(p, a))
                     .collect();
-                format!("{}({})", self.sanitize_name(function_name), args.join(", "))
+                format!("{}({})", function_name, args.join(", "))
             }
             icl::Expression::Field { base, field } => {
                 format!(
                     "{}.{}",
                     self.expression_to_string_with_printer(p, base),
-                    self.sanitize_name(field)
+                    field
                 )
             }
             icl::Expression::Index { base, index } => {
@@ -338,26 +416,41 @@ impl RustCodeGenerator {
                     .map(|(name, expr)| {
                         format!(
                             "{}: {}",
-                            self.sanitize_name(name),
+                            name,
                             self.expression_to_string_with_printer(p, expr)
                         )
                     })
                     .collect();
+                format!("{} {{ {} }}", struct_name, field_strs.join(", "))
+            }
+            icl::Expression::ArrayInit {
+                element_type,
+                element,
+                count,
+            } => {
                 format!(
-                    "{} {{ {} }}",
-                    self.sanitize_name(struct_name),
-                    field_strs.join(", ")
+                    "[{}; {}]",
+                    self.expression_to_string_with_printer(p, element),
+                    count
                 )
             }
+            icl::Expression::TupleInit(expressions) => {
+                let expr_strs: Vec<String> = expressions
+                    .iter()
+                    .map(|e| self.expression_to_string_with_printer(p, e))
+                    .collect();
+                format!("({})", expr_strs.join(", "))
+            }
+            icl::Expression::InlineRust(s) => s.clone(),
         }
     }
 
     /// Convert variable to string
     fn variable_to_string(&self, var: &std::rc::Rc<icl::Variable>, p: &mut Printer) -> String {
         if let Some(name) = &var.name {
-            self.sanitize_name(name)
+            name.clone()
         } else {
-            self.sanitize_name(&p.anon_name(var, "var"))
+            sanitize_anon_name(&p.anon_name(var.clone(), "var"))
         }
     }
 
@@ -412,12 +505,29 @@ impl RustCodeGenerator {
             icl::Type::Pointer(inner) => {
                 format!("*const {}", self.type_to_rust_string(inner))
             }
-            icl::Type::Struct(name) => self.sanitize_name(name),
+            icl::Type::Struct(name) => name.clone(),
             icl::Type::Array(inner, size) => {
                 format!("[{}; {}]", self.type_to_rust_string(inner), size)
             }
+            icl::Type::ArrayRef(inner, size) => {
+                format!("&[{}; {}]", self.type_to_rust_string(inner), size)
+            }
+            icl::Type::Tuple(items) => {
+                let item_strs: Vec<String> =
+                    items.iter().map(|t| self.type_to_rust_string(t)).collect();
+                format!("({})", item_strs.join(", "))
+            }
         }
     }
+}
+
+/// Sanitize a printer-generated anonymous name (e.g. `<func-0>`) into a valid Rust identifier.
+fn sanitize_anon_name(name: &str) -> String {
+    name.replace(':', "_")
+        .replace('/', "_")
+        .replace('<', "_")
+        .replace('>', "_")
+        .replace('-', "_")
 }
 
 pub fn generate_rust_module(icl: &icl::RCL<'_>) -> String {

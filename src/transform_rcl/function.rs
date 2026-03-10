@@ -6,7 +6,7 @@ Handles conversion of function definitions and density function definitions.
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use super::{RCLFunctionConverter, statement, types};
+use super::{RCLFunctionConverter, sanitize_name, statement, types};
 use crate::rcl::{Parameter, Type, model as rcl};
 use crate::spmt::model::{self as spmt, Addr, Interned};
 
@@ -21,13 +21,17 @@ pub fn convert_function<'a, 'm>(
     let mut converter =
         RCLFunctionConverter::new_with_density_inputs(arena, density_inputs.clone());
     converter.already_converted_functions = already_converted_functions;
-    let mut rcl_func = rcl::Function::new(spmt_func.canonical_name.clone(), rcl::Type::F32);
+    let mut rcl_func = rcl::Function::new(
+        spmt_func.canonical_name.as_deref().map(sanitize_name),
+        rcl::Type::F32,
+    );
 
     // Convert parameters
     for (i, param) in spmt_func.parameters.iter().enumerate() {
         let param_type = types::convert_type(&param.t);
         // when param name is empty, generate a unique name based on the parameter index
-        let param_name = param.name.clone().unwrap_or_else(|| format!("param{}", i));
+        let param_name =
+            sanitize_name(&param.name.clone().unwrap_or_else(|| format!("param{}", i)));
         rcl_func.add_parameter(param_name, param_type);
     }
 
@@ -38,7 +42,7 @@ pub fn convert_function<'a, 'm>(
     // Register variables in converter
     for var in &spmt_func.variables {
         let rcl_var = Rc::new(rcl::Variable {
-            name: var.name.clone(),
+            name: var.name.as_deref().map(sanitize_name),
             t: types::convert_type(&var.t),
             mutable: true,
         });
@@ -72,29 +76,36 @@ pub fn convert_density_function<'a, 'm>(
     RCLFunctionConverter<'m>,
 ) {
     let mut rcl_funcs = Vec::new();
-    let mut rcl_func = rcl::Function::new(spmt_df.canonical_name.clone(), rcl::Type::F32);
+    let mut rcl_func = rcl::Function::new(
+        spmt_df.canonical_name.as_deref().map(sanitize_name),
+        rcl::Type::F32,
+    );
 
     // Add position parameters (x, y, z)
     // and origin parameters (ox, oy, oz)
-    rcl_func.add_parameter("p".to_string(), rcl::Type::Struct("Pos3".to_string()));
+    rcl_func.add_parameter("pos3".to_string(), rcl::Type::Struct("Pos3".to_string()));
     rcl_func.add_parameter("origin".to_string(), rcl::Type::Struct("Vec3".to_string()));
     // Add density inputs as parameters
     let mut density_inputs = HashMap::new();
     for (i, input) in spmt_df.density_inputs.iter().enumerate() {
-        let param_name = input
-            .var
-            .name
-            .clone()
-            .unwrap_or_else(|| format!("input_{}", input.density_function.addr() as usize));
+        let param_name = sanitize_name(
+            &input
+                .var
+                .name
+                .clone()
+                .unwrap_or_else(|| format!("input_{}", input.density_function.addr() as usize)),
+        );
+
+        let dimensions = input.dimensions.0 * input.dimensions.1 * input.dimensions.2;
         rcl_func.add_parameter(
             param_name.clone(),
-            rcl::Type::Array(Box::new(Type::F32), 16 * 16 * 256),
+            rcl::Type::ArrayRef(Box::new(Type::F32), dimensions as usize),
         );
         density_inputs.insert(
             input.density_function.addr(),
             Parameter {
                 name: param_name,
-                t: rcl::Type::Array(Box::new(Type::F32), 16 * 16 * 256),
+                t: rcl::Type::ArrayRef(Box::new(Type::F32), 16 * 16 * 256),
             },
         );
     }
@@ -119,7 +130,7 @@ pub fn convert_density_function<'a, 'm>(
     // Register variables in converter
     for var in &spmt_df.variables {
         let rcl_var = Rc::new(rcl::Variable {
-            name: var.name.clone(),
+            name: var.name.as_deref().map(sanitize_name),
             t: types::convert_type(&var.t),
             mutable: true,
         });

@@ -70,11 +70,12 @@ impl<'m> RCLFunctionConverter<'m> {
     /// Get or create an RCL variable from an SPMT variable
     pub fn get_or_create_variable(&mut self, spmt_var: Rc<spmt::Variable>) -> Rc<rcl::Variable> {
         let addr = spmt_var.addr();
+
         if let Some(var) = self.var_map.get(&addr) {
             var.clone()
         } else {
             let rcl_var = Rc::new(rcl::Variable {
-                name: spmt_var.name.clone(),
+                name: spmt_var.name.as_deref().map(sanitize_name),
                 t: types::convert_type(&spmt_var.t),
                 mutable: true,
             });
@@ -102,6 +103,16 @@ impl<'m> RCLFunctionConverter<'m> {
     pub fn register_variable(&mut self, spmt_var: Rc<spmt::Variable>, rcl_var: Rc<rcl::Variable>) {
         self.var_map.insert(spmt_var.addr(), rcl_var);
     }
+}
+
+/// Sanitize a name to make it a valid Rust identifier.
+/// Replaces `:`, `/`, `<`, `>`, and `-` with `_`.
+pub fn sanitize_name(name: &str) -> String {
+    name.replace(':', "_")
+        .replace('/', "_")
+        .replace('<', "_")
+        .replace('>', "_")
+        .replace('-', "_")
 }
 
 /// Convert an SPMT function to an RCL function

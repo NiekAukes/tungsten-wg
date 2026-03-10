@@ -27,3 +27,17 @@ impl Scale {
         )
     }
 }
+
+pub trait Flatten {
+    type Output;
+
+    fn flatten(&self) -> Self::Output;
+}
+
+impl Flatten for (i32, i32, i32) {
+    type Output = i32;
+
+    fn flatten(&self) -> Self::Output {
+        self.0 * self.1 * self.2
+    }
+}

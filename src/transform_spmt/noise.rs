@@ -5,17 +5,30 @@ use crate::{
     spmt::model::{
         BinaryOperator, DensityFunction, Expression, Function, Statement, Variable, VariableType,
     },
-    transform_spmt::newvar,
+    transform_spmt::{density::make_rpos3, newvar},
 };
 
-pub fn lower_normal_noise<'m>(noise: NormalNoise, cname: Option<String>) -> Function<'m> {
+pub fn lower_normal_noise<'m>(
+    noise: NormalNoise,
+    cname: Option<String>,
+    as_density: bool,
+) -> Function<'m> {
     let mut variables = Vec::new();
     let mut body = Vec::new();
 
     /* -----------------------------
     Input position
     ----------------------------- */
-    let p = newvar("p", VariableType::Vec3);
+    let rpos3 = newvar("rpos3", VariableType::Vec3);
+    if as_density {
+        let origin = newvar("origin", VariableType::Vec3);
+        let pos3 = newvar("pos3", VariableType::Pos3);
+        variables.push(rpos3.clone());
+        body.push(Statement::Assign {
+            target: rpos3.clone(),
+            value: make_rpos3(pos3.clone(), origin.clone(), (1.0, 1.0, 1.0)),
+        });
+    }
 
     /* -----------------------------
     freq0 = pow(2.0, firstOctave)
@@ -30,6 +43,7 @@ pub fn lower_normal_noise<'m>(noise: NormalNoise, cname: Option<String>) -> Func
                 Expression::Float(2.0),
                 Expression::Float(noise.first_octave as f64),
             ],
+            parameter_types: vec![VariableType::F32, VariableType::F32],
         },
     });
 
@@ -67,13 +81,14 @@ pub fn lower_normal_noise<'m>(noise: NormalNoise, cname: Option<String>) -> Func
 
         let scaled_pos = Expression::BinaryOp {
             op: BinaryOperator::Multiply,
-            left: Box::new(Expression::Variable(p.clone())),
+            left: Box::new(Expression::Variable(rpos3.clone())),
             right: Box::new(Expression::Variable(freqs[i].clone())),
         };
 
         let perlin = Expression::ExternCall {
             function_name: "perlin".into(),
             parameters: vec![scaled_pos],
+            parameter_types: vec![VariableType::Vec3],
         };
 
         let scaled_noise = Expression::BinaryOp {
@@ -109,7 +124,7 @@ pub fn lower_normal_noise<'m>(noise: NormalNoise, cname: Option<String>) -> Func
         canonical_name: None,
         //density_inputs: vec![],
         //helper_functions: vec![],
-        parameters: vec![p],
+        parameters: vec![rpos3],
         body,
         variables,
     }

@@ -118,6 +118,7 @@ impl<'a, 'm> Transformer<'a, 'm> {
         self.final_model.functions.extend(helpers);
         let density_function: DensityFunctionRef<'m> =
             DensityFunctionRef::new(self.arena.alloc(density_function));
+        let _a = density_function.canonical_name.as_ref().unwrap();
 
         bs.density_function_cache
             .insert(density, density_function.clone());

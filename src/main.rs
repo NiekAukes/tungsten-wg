@@ -9,6 +9,7 @@ use crate::{
         model::{Addr, DensityFunctionRef},
         pretty::PrettyPrint,
     },
+    transform_orchestration_rcl::OrchestrationConverter,
 };
 
 pub mod config_load;
@@ -24,6 +25,7 @@ pub mod orchestrate;
 pub mod transform_spmt;
 
 pub mod rcl;
+pub mod transform_orchestration_rcl;
 pub mod transform_rcl;
 
 pub fn main() {
@@ -171,6 +173,12 @@ pub fn main() {
         already_converted_functions = c.already_converted_functions;
     }
 
+    let orchestration_conv = OrchestrationConverter::new(&rcl_arena);
+    let orchestration_rcl = orchestration_conv.convert(
+        orchestration.arrange_waves(),
+        orchestration.get_primary_shaders(),
+    );
+
     // write the RCL functions to a file in a different folder
     let folder = "../rcl_density";
     // generate the
@@ -178,7 +186,10 @@ pub fn main() {
     let rust_cg = RustCodeGenerator::new();
     //println!("RCL Model: {:?}", rcl_model);
     let rcl_output = rust_cg.generate_module(&rcl_model);
+    let orch_output = rust_cg.generate_module(&orchestration_rcl);
     std::fs::write(format!("{}/src/density_function.rs", folder), rcl_output)
+        .expect("Unable to write file");
+    std::fs::write(format!("{}/src/orchestration.rs", folder), orch_output)
         .expect("Unable to write file");
 }
 

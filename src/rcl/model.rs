@@ -24,6 +24,7 @@ pub struct RCL<'m> {
     pub functions: Vec<FunctionRef<'m>>,
     pub structs: Vec<StructRef<'m>>,
     pub main_functions: Vec<FunctionRef<'m>>,
+    pub import_statements: Vec<String>,
 }
 
 /// A low-level CPU function with typed parameters and return type
@@ -80,6 +81,8 @@ pub enum Type {
     Pointer(Box<Type>),
     Struct(String),
     Array(Box<Type>, usize),
+    ArrayRef(Box<Type>, usize),
+    Tuple(Vec<Type>),
 }
 
 impl Type {
@@ -118,6 +121,11 @@ impl std::fmt::Display for Type {
             Type::Pointer(t) => write!(f, "*{}", t),
             Type::Struct(name) => write!(f, "{}", name),
             Type::Array(t, size) => write!(f, "[{}; {}]", t, size),
+            Type::ArrayRef(t, size) => write!(f, "&[{}; {}]", t, size),
+            Type::Tuple(items) => {
+                let item_strs: Vec<String> = items.iter().map(|t| format!("{}", t)).collect();
+                write!(f, "({})", item_strs.join(", "))
+            }
         }
     }
 }
@@ -131,6 +139,12 @@ pub enum Statement<'m> {
     // Assignment: variable = expression
     Assign {
         target: Rc<Variable>,
+        value: Expression<'m>,
+    },
+
+    ArrayAssign {
+        target: Rc<Variable>,
+        index: Expression<'m>,
         value: Expression<'m>,
     },
 
@@ -151,17 +165,25 @@ pub enum Statement<'m> {
     },
 
     // For loop: for (init; condition; increment) { body }
-    // For {
-    //     init: Option<Box<Statement<'m>>>,
-    //     condition: Option<Expression<'m>>,
-    //     increment: Option<Box<Statement<'m>>>,
-    //     body: Vec<Statement<'m>>,
-    // },
+    For {
+        init: Option<Box<Statement<'m>>>,
+        condition: Option<Expression<'m>>,
+        increment: Option<Box<Statement<'m>>>,
+        body: Vec<Statement<'m>>,
+    },
+
+    // Iter loop: for variable in iterable { body }
+    ForIn {
+        variable: Rc<Variable>,
+        iterable: Expression<'m>,
+        body: Vec<Statement<'m>>,
+    },
 
     // Variable declaration with optional initialization
     Declare {
         variable: Rc<Variable>,
         init: Option<Expression<'m>>,
+        mutable: bool,
     },
 
     // Function call as statement
@@ -242,6 +264,17 @@ pub enum Expression<'m> {
         struct_name: String,
         fields: Vec<(String, Expression<'m>)>,
     },
+
+    ArrayInit {
+        element_type: Type,
+        element: Box<Expression<'m>>,
+        count: usize,
+    },
+
+    TupleInit(Vec<Expression<'m>>),
+
+    // Raw inline Rust code
+    InlineRust(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -329,6 +362,11 @@ impl<'m> RCL<'m> {
             functions: Vec::new(),
             structs: Vec::new(),
             main_functions: Vec::new(),
+            import_statements: Vec::new(),
         }
+    }
+
+    pub fn add_import(&mut self, import: String) {
+        self.import_statements.push(import);
     }
 }

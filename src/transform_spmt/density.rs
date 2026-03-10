@@ -28,13 +28,14 @@ pub struct DensityBuilder<'a, 'm> {
     density_function_inputs: HashMap<Density<'a>, DensityInput<'m>>,
     noise_inputs: std::collections::HashMap<NormalNoise<'a>, DensityInput<'m>>,
     helper_functions: Vec<FunctionRef<'m>>,
-    origin: Rc<Variable>,
-    p: Rc<Variable>,
+    pub(crate) origin: Rc<Variable>,
+    pub(crate) rpos3: Rc<Variable>,
+    pub(crate) p: Rc<Variable>,
 }
 
 impl<'a, 'm> DensityBuilder<'a, 'm> {
     pub fn new(arena: &'m bumpalo::Bump, state: BuilderState<'a, 'm>) -> Self {
-        let s = Self {
+        let mut s = Self {
             density_function: DensityFunction {
                 body: Vec::new(),
                 canonical_name: None,
@@ -49,9 +50,22 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
             builder_state: Some(state),
             density_function_inputs: HashMap::new(),
             noise_inputs: HashMap::new(),
-            p: newvar("p", VariableType::Pos3),
+            p: newvar("pos3", VariableType::Pos3),
+            rpos3: newvar("rpos3", VariableType::Vec3),
             origin: newvar("origin", VariableType::Vec3),
         };
+
+        s.add_variable(s.rpos3.clone());
+
+        // initialize rpos3 = origin + p * scaled_origin
+        s.add_statement(Statement::Assign {
+            target: s.rpos3.clone(),
+            value: make_rpos3(
+                s.p.clone(),
+                s.origin.clone(),
+                s.builder_state.as_ref().unwrap().working_scaled_origin,
+            ),
+        });
         s
     }
 
@@ -81,6 +95,14 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         let mut function = self.density_function;
         function.helper_functions = self.helper_functions.clone();
         function.add_statement(Statement::Return(ret));
+
+        // if the function name is None, generate a unique name based on the address of the function
+        if function.canonical_name.is_none() {
+            let a = self.arena.alloc(());
+            let id = a as *const () as usize;
+            function.canonical_name = Some(format!("density_function_{}", id));
+        }
+
         (
             function,
             self.helper_functions,
@@ -123,21 +145,29 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
 
     pub fn lower_noise(&mut self, density: NormalNoise<'a>) -> FunctionRef<'m> {
         // lower the noise into a density function
-        let function = lower_normal_noise(density, None);
+        let function = lower_normal_noise(density, None, false);
         let function = FunctionRef::new(self.arena.alloc(function));
         function
     }
 
     pub fn lower_noise_as_density(&mut self, density: NormalNoise<'a>) -> DensityFunctionRef<'m> {
         // lower the noise into a density function
-        let function = lower_normal_noise(density, None);
-        let density_function = DensityFunction {
+        let function = lower_normal_noise(density, None, true);
+        let mut density_function = DensityFunction {
             body: function.body,
             canonical_name: function.canonical_name,
             density_inputs: vec![],
             variables: function.variables,
             helper_functions: vec![],
         };
+
+        if density_function.canonical_name.is_none() {
+            // allocate some bytes in the arena to get a unique id for the function
+            let a = self.arena.alloc(());
+            let id = a as *const () as usize;
+            density_function.canonical_name = Some(format!("noise_function_{}", id));
+        }
+
         let density_function_ref = DensityFunctionRef::new(self.arena.alloc(density_function));
         density_function_ref
     }
@@ -378,6 +408,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                 let clamped_expr = Expression::ExternCall {
                     function_name: "clamp".to_string(),
                     parameters: vec![y_expr, Expression::Float(from_y), Expression::Float(to_y)],
+                    parameter_types: vec![VariableType::F32, VariableType::F32, VariableType::F32],
                 };
 
                 // 3. Create clampedY variable
@@ -480,6 +511,14 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                         Expression::Float(y_factor),
                         Expression::Float(y_scale),
                     ],
+                    parameter_types: vec![
+                        VariableType::Pos3,
+                        VariableType::F32,
+                        VariableType::F32,
+                        VariableType::F32,
+                        VariableType::F32,
+                        VariableType::F32,
+                    ],
                 }
             }
             DensityType::ShiftedNoise {
@@ -504,12 +543,14 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                 // 3. p + shift_vec
                 let shifted_position = Expression::BinaryOp {
                     op: BinaryOperator::Add,
-                    left: Box::new(Expression::Variable(self.p.clone())),
+                    left: Box::new(Expression::Variable(self.rpos3.clone())),
                     right: Box::new(shift_vec),
                 };
 
                 // 4. Lower noise but don't mark it, we just want the density function reference
                 let noise_function_ref = self.lower_noise(noise);
+                // add it as a helper function
+                self.helper_functions.push(noise_function_ref.clone());
 
                 Expression::FunctionCall {
                     function: noise_function_ref,
@@ -639,6 +680,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                 Expression::ExternCall {
                     function_name: "abs".into(),
                     parameters: vec![arg_expr],
+                    parameter_types: vec![VariableType::F32],
                 }
             }
             DensityType::Min { left, right } => {
@@ -647,6 +689,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                 Expression::ExternCall {
                     function_name: "min".into(),
                     parameters: vec![left_expr, right_expr],
+                    parameter_types: vec![VariableType::F32, VariableType::F32],
                 }
             }
             DensityType::Max { left, right } => {
@@ -655,6 +698,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                 Expression::ExternCall {
                     function_name: "max".into(),
                     parameters: vec![left_expr, right_expr],
+                    parameter_types: vec![VariableType::F32, VariableType::F32],
                 }
             }
             DensityType::RangeChoice {
@@ -768,5 +812,37 @@ pub fn make_clamp(input: Expression, min: f64, max: f64) -> Expression {
     Expression::ExternCall {
         function_name: "clamp".into(),
         parameters: vec![input, Expression::Float(min), Expression::Float(max)],
+        parameter_types: vec![VariableType::F32, VariableType::F32, VariableType::F32],
+    }
+}
+
+pub fn make_rpos3<'m>(
+    p: Rc<Variable>,
+    origin: Rc<Variable>,
+    scale: (f32, f32, f32),
+) -> Expression<'m> {
+    // rpos3 = origin + p * scale
+    if scale == (1.0, 1.0, 1.0) {
+        return Expression::BinaryOp {
+            op: BinaryOperator::Add,
+            left: Box::new(Expression::Variable(origin)),
+            right: Box::new(Expression::Variable(p)),
+        };
+    }
+    Expression::BinaryOp {
+        op: BinaryOperator::Add,
+        left: Box::new(Expression::Variable(origin)),
+        right: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Multiply,
+            left: Box::new(Expression::Variable(p)),
+            right: Box::new(Expression::Construct {
+                t: VariableType::Vec3,
+                args: vec![
+                    Expression::Float(scale.0 as f64),
+                    Expression::Float(scale.1 as f64),
+                    Expression::Float(scale.2 as f64),
+                ],
+            }),
+        }),
     }
 }

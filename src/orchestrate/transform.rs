@@ -43,11 +43,7 @@ impl<'m, 'a> Transformer<'a, 'm> {
         if let Some(shader_ref) = self.cache.get(&density_function) {
             return *shader_ref;
         }
-        let name = density_function
-            .canonical_name
-            .clone()
-            .unwrap_or_else(|| "unnamed".to_string())
-            .clone();
+        let name = density_function.canonical_name.as_ref().unwrap();
         let source = format!("density_function: {}", name);
         let mut dependencies = vec![];
 
@@ -204,5 +200,20 @@ impl<'m> Orchestration<'m> {
 
         p.dedent();
         p.line("}");
+    }
+
+    pub fn get_primary_shaders(&self) -> Vec<ShaderDependency<'m>> {
+        // shaders that are not depended on by any other shader
+        let mut depended_on = HashSet::new();
+        for shader in &self.main_shaders {
+            for input in &shader.shader.inputs {
+                depended_on.insert(input.clone());
+            }
+        }
+        self.main_shaders
+            .iter()
+            .filter(|s| !depended_on.contains(s))
+            .cloned()
+            .collect()
     }
 }
