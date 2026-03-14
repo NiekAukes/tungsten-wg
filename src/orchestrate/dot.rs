@@ -185,7 +185,7 @@ impl<'m> Orchestration<'m> {
             p.line("rank=same;");
 
             for dep in wave {
-                let id = p.anon_name(dep.shader, "shader");
+                let id = dep.get_id();
                 let dimensions = dep.dimensions;
                 let scale = dep.scaled_origin.as_float();
                 p.line(&format!(
@@ -208,11 +208,11 @@ impl<'m> Orchestration<'m> {
         // Emit edges
         for wave in &waves {
             for dep in wave {
-                let from_id = p.anon_name(dep.shader, "shader");
+                let from_id = dep.get_id();
                 let from_wave = wave_of[dep];
 
                 for input_dep in &dep.shader.inputs {
-                    let to_id = p.anon_name(input_dep.shader, "shader");
+                    let to_id = input_dep.get_id();
                     let to_wave = wave_of[input_dep];
 
                     let distance = from_wave as isize - to_wave as isize;
@@ -232,5 +232,20 @@ impl<'m> Orchestration<'m> {
 
         p.dedent();
         p.line("}");
+    }
+}
+
+impl ShaderDependency<'_> {
+    pub fn get_id(&self) -> String {
+        format!(
+            "<shader_{:?}_{}x{}x{}_{}_{}_{}>",
+            self.shader.addr(),
+            self.dimensions.0,
+            self.dimensions.1,
+            self.dimensions.2,
+            self.scaled_origin.x,
+            self.scaled_origin.y,
+            self.scaled_origin.z
+        )
     }
 }

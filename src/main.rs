@@ -31,11 +31,11 @@ pub mod transform_rcl;
 pub fn main() {
     let mut data = config_load::MinecraftDataRaw::new();
     config_load::load_all_configs(&mut data, "vanilla_worldgen_1.21.1", None);
-    config_load::load_all_configs(&mut data, "JJThunderToTheMax", None);
+    //config_load::load_all_configs(&mut data, "JJThunderToTheMax", None);
     // reexport the config
     //config_load::reexport(&data, "reexport_jj");
 
-    let arena = bumpalo::Bump::with_capacity(1 * 1024 * 1024); // 1 MB initial capacity
+    let arena: bumpalo::Bump = bumpalo::Bump::with_capacity(1 * 1024 * 1024); // 1 MB initial capacity
     let mut mcdata = parse::MinecraftData::new(&arena, &data);
     mcdata.parse_from_raw();
     //println!("Parsed Minecraft data: {:?}", mcdata);
@@ -58,7 +58,10 @@ pub fn main() {
 
     // print the final arena usage
     let bytes = transform_arena.allocated_bytes();
-    println!("Final arena usage: {} MB", bytes as f64 / (1024.0 * 1024.0));
+    println!(
+        "Final arena usage after SPMT transformation: {} MB",
+        bytes as f64 / (1024.0 * 1024.0)
+    );
 
     let mut printer = spmt::pretty::Printer::new();
     program.pretty(&mut printer);

@@ -352,6 +352,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                 */
                 let xv = anonvar(VariableType::F32);
                 let arg_expr = self.lower_density(argument);
+                self.add_variable(xv.clone());
                 self.add_statement(Statement::Assign {
                     target: xv.clone(),
                     value: make_clamp(arg_expr, -1.0, 1.0),
@@ -374,6 +375,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                     }),
                 };
                 let result_var = anonvar(VariableType::F32);
+                self.add_variable(result_var.clone());
                 self.add_statement(Statement::Assign {
                     target: result_var.clone(),
                     value: result,
@@ -504,7 +506,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                 Expression::ExternCall {
                     function_name: "old_blended_noise".into(),
                     parameters: vec![
-                        Expression::Variable(self.p.clone()),
+                        Expression::Variable(self.rpos3.clone()),
                         Expression::Float(smear_scale_multiplier),
                         Expression::Float(xz_factor),
                         Expression::Float(xz_scale),
@@ -512,7 +514,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                         Expression::Float(y_scale),
                     ],
                     parameter_types: vec![
-                        VariableType::Pos3,
+                        VariableType::Vec3,
                         VariableType::F32,
                         VariableType::F32,
                         VariableType::F32,

@@ -355,7 +355,7 @@ impl<'m> DensityParseFunctions<'m> for MinecraftData<'m> {
                             });
                             self.arena.alloc(DensityType::RangeChoice {
                                 input: argument,
-                                min_inclusive: f64::NEG_INFINITY,
+                                min_inclusive: -9999999999.0, // effectively negative infinity
                                 max_exclusive: 0.0,
                                 when_in_range: half_negative,
                                 when_out_of_range: argument,
