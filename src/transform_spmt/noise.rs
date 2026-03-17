@@ -11,6 +11,7 @@ use crate::{
 pub fn lower_normal_noise<'m>(
     noise: NormalNoise,
     cname: Option<String>,
+    scale: (f32, f32, f32),
     as_density: bool,
 ) -> Function<'m> {
     let mut variables = Vec::new();
@@ -26,7 +27,7 @@ pub fn lower_normal_noise<'m>(
         variables.push(rpos3.clone());
         body.push(Statement::Assign {
             target: rpos3.clone(),
-            value: make_rpos3(pos3.clone(), origin.clone(), (1.0, 1.0, 1.0)),
+            value: make_rpos3(pos3.clone(), origin.clone(), scale),
         });
     }
 

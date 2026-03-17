@@ -44,7 +44,11 @@ impl<'m> DensityParseFunctions<'m> for MinecraftData<'m> {
                             let y_scale =
                                 obj.get("y_scale").and_then(|v| v.as_f64()).unwrap_or(1.0);
 
-                            self.arena.alloc(DensityType::Noise(*noise))
+                            self.arena.alloc(DensityType::Noise {
+                                noise: *noise,
+                                xz_scale,
+                                y_scale,
+                            })
                         }
                         "minecraft:cache_2d" => {
                             let source_value = obj
@@ -448,9 +452,9 @@ impl<'m> DensityParseFunctions<'m> for MinecraftData<'m> {
             // may be a reference to another density function
             if let Some(referenced) = self.density_functions.get(s) {
                 *referenced
-            } else if let Some(referenced) = self.normal_noises.get(s) {
+            //} else if let Some(referenced) = self.normal_noises.get(s) {
                 // also allow referencing normal noises directly
-                self.arena.alloc(DensityType::Noise(*referenced))
+                //self.arena.alloc(DensityType::Noise(*referenced))
             } else if let Some(referenced) = self.raw_data.density_functions.get(s) {
                 // also allow referencing density functions directly
                 let parsed = self.parse_density_function(referenced);

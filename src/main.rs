@@ -13,8 +13,6 @@ use crate::{
 };
 
 pub mod config_load;
-pub mod eval_reference;
-pub mod gpu_eval;
 pub mod parse;
 pub mod spmt;
 //pub mod tape;
@@ -30,10 +28,11 @@ pub mod transform_rcl;
 
 pub fn main() {
     let mut data = config_load::MinecraftDataRaw::new();
-    config_load::load_all_configs(&mut data, "vanilla_worldgen_1.21.1", None);
+    //config_load::load_all_configs(&mut data, "vanilla_worldgen_1.21.1", None);
     //config_load::load_all_configs(&mut data, "JJThunderToTheMax", None);
+    config_load::load_all_configs(&mut data, "testmod", None);
     // reexport the config
-    //config_load::reexport(&data, "reexport_jj");
+    config_load::reexport(&data, "reexport_t");
 
     let arena: bumpalo::Bump = bumpalo::Bump::with_capacity(1 * 1024 * 1024); // 1 MB initial capacity
     let mut mcdata = parse::MinecraftData::new(&arena, &data);
@@ -52,6 +51,7 @@ pub fn main() {
     let transformer = transform_spmt::Transformer::new(&transform_arena, (16, 256, 16));
     //println!("noise seetings keys: {:?}", mcdata.noise_settings.keys());
     let noise_generator = mcdata.noise_settings.get("minecraft:overworld").unwrap();
+    //println!("Transforming noise generator: {:?}", noise_generator);
     let program = transformer.transform(noise_generator);
 
     drop(arena);

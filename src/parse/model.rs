@@ -8,7 +8,11 @@ pub type Density<'m> = Interned<'m, DensityType<'m>>;
 #[derive(Debug, Clone, PartialEq)]
 pub enum DensityType<'m> {
     Const(f64),
-    Noise(NormalNoise<'m>), // Reference to NormalNoise
+    Noise {
+        noise: NormalNoise<'m>,
+        xz_scale: f64,
+        y_scale: f64,
+    },
     Add {
         left: Density<'m>,
         right: Density<'m>,
@@ -133,9 +137,15 @@ impl Hash for DensityType<'_> {
                 0.hash(state);
                 val.to_bits().hash(state);
             }
-            DensityType::Noise(noise) => {
+            DensityType::Noise {
+                noise,
+                xz_scale,
+                y_scale,
+            } => {
                 1.hash(state);
                 noise.hash(state);
+                xz_scale.to_bits().hash(state);
+                y_scale.to_bits().hash(state);
             }
             DensityType::Add { left, right } => {
                 2.hash(state);

@@ -73,6 +73,7 @@ impl<'a, 'm> Transformer<'a, 'm> {
             self.final_model
                 .main_density_functions
                 .push(density_function);
+            self.final_model.density_functions.push(density_function);
         }
 
         let BuilderState {
@@ -81,8 +82,23 @@ impl<'a, 'm> Transformer<'a, 'm> {
             ..
         } = self.builder_state.take().unwrap();
 
+        println!(
+            "Density function cache size: {}, Noise cache size: {}",
+            density_function_cache.len(),
+            noise_cache.len()
+        );
+
         for density_function in density_function_cache.values() {
-            self.final_model.density_functions.push(*density_function);
+            // check if the density function is already in the main density functions, and if not, add it to the final model
+            if !self
+                .final_model
+                .main_density_functions
+                .iter()
+                .any(|df| df.canonical_name == density_function.canonical_name)
+             {
+                self.final_model.density_functions.push(*density_function);
+            } 
+            //self.final_model.density_functions.push(*density_function);
         }
         for noise in noise_cache.values() {
             self.final_model.density_functions.push(*noise);

@@ -18,7 +18,7 @@ impl<'m> DensityType<'m> {
             DensityType::Const(val) => {
                 writeln!(f, "{}Const({})", pad(indent), val)
             }
-            DensityType::Noise(_) => {
+            DensityType::Noise {..} => {
                 writeln!(f, "{}Noise(...)", pad(indent))
             }
             DensityType::Add { left, right } => {

@@ -57,6 +57,7 @@ impl<'m> OrchestrationConverter<'m> {
             for (j, dep) in shader_deps.iter().enumerate() {
                 let shader_name = sanitize_name(&dep.shader.name);
                 let dims = dep.dimensions.flatten();
+                let scaled_origin = dep.scaled_origin.as_float();
                 let output_var = Rc::new(crate::rcl::model::Variable {
                     name: Some(format!("{}_output", shader_name)),
                     t: Type::Struct(format!("Box<[f32; {}]>", dims)),
@@ -152,21 +153,28 @@ impl<'m> OrchestrationConverter<'m> {
         }
 
         // handle the return values of the orchestration function
-        let mut return_types = Vec::new();
-        let mut return_values = Vec::new();
+        let struct_name = "OrchestrationOutput";
+        let mut output_struct = crate::rcl::model::Struct::new(struct_name.to_string());
+        let mut struct_fields = Vec::new();
         for dep in returns {
             let output_var = shader_output_map.get(&dep.shader).unwrap();
-            return_types.push(output_var.t.clone());
-            return_values.push(Expression::Variable(output_var.clone()));
+            let field_name = sanitize_name(&dep.shader.name);
+            output_struct.add_field(field_name.clone(), output_var.t.clone());
+            struct_fields.push((field_name, Expression::Variable(output_var.clone())));
         }
 
-        // return a tuple of the return values
-        orch_function.return_type = Type::Tuple(return_types);
+        self.rcl_model
+            .structs
+            .push(Interned::new(self.arena.alloc(output_struct)));
+
+        // return a struct with named fields
+        orch_function.return_type = Type::Struct(struct_name.to_string());
         orch_function
             .body
-            .push(Statement::Return(Some(Expression::TupleInit(
-                return_values,
-            ))));
+            .push(Statement::Return(Some(Expression::StructInit {
+                struct_name: struct_name.to_string(),
+                fields: struct_fields,
+            })));
 
         self.rcl_model
             .main_functions

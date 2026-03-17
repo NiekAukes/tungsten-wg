@@ -5,15 +5,19 @@ use std::{
 };
 
 use crate::{
-    parse::model::{Density, DensityType, NormalNoise},
-    spmt::model::{
+    orchestrate::Scale, parse::model::{Density, DensityType, NormalNoise}, spmt::model::{
         BinaryOperator, DensityFunction, DensityFunctionRef, DensityInput, Expression, Function,
         FunctionRef, SPMT, Statement, Variable, VariableType,
-    },
-    transform_spmt::{
+    }, transform_spmt::{
         BuilderState, DensityFunctionCache, NoiseCache, anonvar, newvar, noise::lower_normal_noise,
-    },
+    }
 };
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct NormalNoiseScaled<'a> {
+    noise: NormalNoise<'a>,
+    scale: Scale,
+}
 
 /// Builds a single density function for a given density.
 /// This is used to build the density functions for the model,
@@ -26,7 +30,7 @@ pub struct DensityBuilder<'a, 'm> {
     builder_state: Option<BuilderState<'a, 'm>>,
 
     density_function_inputs: HashMap<Density<'a>, DensityInput<'m>>,
-    noise_inputs: std::collections::HashMap<NormalNoise<'a>, DensityInput<'m>>,
+    noise_inputs: std::collections::HashMap<NormalNoiseScaled<'a>, DensityInput<'m>>,
     helper_functions: Vec<FunctionRef<'m>>,
     pub(crate) origin: Rc<Variable>,
     pub(crate) rpos3: Rc<Variable>,
@@ -143,16 +147,16 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         }
     }
 
-    pub fn lower_noise(&mut self, density: NormalNoise<'a>) -> FunctionRef<'m> {
+    pub fn lower_noise(&mut self, density: NormalNoise<'a>, scale: (f32, f32, f32)) -> FunctionRef<'m> {
         // lower the noise into a density function
-        let function = lower_normal_noise(density, None, false);
+        let function = lower_normal_noise(density, None, scale, false);
         let function = FunctionRef::new(self.arena.alloc(function));
         function
     }
 
-    pub fn lower_noise_as_density(&mut self, density: NormalNoise<'a>) -> DensityFunctionRef<'m> {
+    pub fn lower_noise_as_density(&mut self, density: NormalNoise<'a>, scale: (f32, f32, f32)) -> DensityFunctionRef<'m> {
         // lower the noise into a density function
-        let function = lower_normal_noise(density, None, true);
+        let function = lower_normal_noise(density, None,scale, true);
         let mut density_function = DensityFunction {
             body: function.body,
             canonical_name: function.canonical_name,
@@ -172,9 +176,14 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         density_function_ref
     }
 
-    pub fn lower_noise_and_mark(&mut self, noise: NormalNoise<'a>) -> DensityInput<'m> {
+    pub fn lower_noise_and_mark(&mut self, noise: NormalNoise<'a>, xz_scale: f64, y_scale: f64) -> DensityInput<'m> {
         // check if we already have a density function for this noise
-        if let Some(cached) = self.noise_inputs.get(&noise) {
+        // create a scaled noise struct to use as a key for the cache
+        let noise_scaled = NormalNoiseScaled {
+            noise,
+            scale: Scale::new(xz_scale as f32, y_scale as f32, xz_scale as f32),
+        };
+        if let Some(cached) = self.noise_inputs.get(&noise_scaled) {
             return cached.clone();
         }
 
@@ -184,19 +193,25 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         let density_function_ref = if let Some(cached) = bs.noise_cache.get(&noise) {
             cached.clone()
         } else {
-            let density_function_ref = self.lower_noise_as_density(noise);
+            let density_function_ref = self.lower_noise_as_density(noise,
+                (xz_scale as f32, y_scale as f32, xz_scale as f32));
             bs.noise_cache.insert(noise, density_function_ref.clone());
             density_function_ref
         };
         let v = anonvar(VariableType::DensityInput);
+        let dimensions = bs.working_dimensions;
+        let mut scaled_origin = bs.working_scaled_origin;
+        scaled_origin.0 *= xz_scale as f32;
+        scaled_origin.1 *= y_scale as f32;
+        scaled_origin.2 *= xz_scale as f32;
         let input = DensityInput {
             var: v.clone(),
             density_function: density_function_ref.clone(),
-            scaled_origin: bs.working_scaled_origin,
-            dimensions: bs.working_dimensions,
+            scaled_origin: scaled_origin,
+            dimensions: dimensions,
         };
 
-        self.noise_inputs.insert(noise, input.clone());
+        self.noise_inputs.insert(noise_scaled, input.clone());
         self.density_function.density_inputs.push(input.clone());
         if let Some(func) = &mut self.function {
             func.variables.push(v);
@@ -314,9 +329,9 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
 
     pub fn lower_density(&mut self, density: Density<'a>) -> Expression<'m> {
         match *density {
-            DensityType::Noise(noise) => {
+            DensityType::Noise { noise, xz_scale, y_scale } => {
                 // A noise call specifically
-                let fref = self.lower_noise_and_mark(noise);
+                let fref = self.lower_noise_and_mark(noise, xz_scale, y_scale);
                 // use the density input as the expression
                 Expression::DensityVariable(fref)
             }
@@ -550,7 +565,8 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                 };
 
                 // 4. Lower noise but don't mark it, we just want the density function reference
-                let noise_function_ref = self.lower_noise(noise);
+                let noise_function_ref = self.lower_noise(noise, 
+                    (xz_scale as f32, y_scale as f32, xz_scale as f32));
                 // add it as a helper function
                 self.helper_functions.push(noise_function_ref.clone());
 
