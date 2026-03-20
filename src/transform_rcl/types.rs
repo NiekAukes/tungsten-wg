@@ -4,6 +4,7 @@ Type conversion utilities for translating SPMT types to RCL types.
 
 use crate::rcl::model as rcl;
 use crate::spmt::model as spmt;
+use crate::transform_rcl::sanitize_name;
 
 /// Convert an SPMT variable type to an RCL type
 pub fn convert_type(t: &spmt::VariableType) -> rcl::Type {
@@ -13,6 +14,10 @@ pub fn convert_type(t: &spmt::VariableType) -> rcl::Type {
         spmt::VariableType::Pos3 => rcl::Type::Struct("Pos3".to_string()),
         spmt::VariableType::F32 => rcl::Type::F32,
         spmt::VariableType::I32 => rcl::Type::I32,
+        spmt::VariableType::I64 => rcl::Type::I64,
+        spmt::VariableType::PermutationTable => rcl::Type::Ref(Box::new(rcl::Type::Struct(
+            crate::transform_rcl::PERLIN_NOISE_SAMPLER_STRUCT_NAME.to_string(),
+        ))),
     }
 }
 
@@ -39,4 +44,13 @@ pub fn convert_unary_op(op: spmt::UnaryOperator) -> rcl::UnaryOperator {
     match op {
         spmt::UnaryOperator::Negate => rcl::UnaryOperator::Negate,
     }
+}
+
+pub fn permutation_table_var_name(perm_table: &spmt::PermutationTableInput) -> String {
+    sanitize_name(&format!(
+        "perm_table_{}_{}_{}",
+        perm_table.ident,
+        perm_table.subident_index,
+        perm_table.subident.as_ref().unwrap_or(&"".to_string())
+    ))
 }

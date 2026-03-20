@@ -9,6 +9,7 @@ use std::rc::Rc;
 use super::{RCLFunctionConverter, sanitize_name, statement, types};
 use crate::rcl::{Parameter, Type, model as rcl};
 use crate::spmt::model::{self as spmt, Addr, Interned};
+use crate::transform_rcl::types::{convert_type, permutation_table_var_name};
 
 /// Convert an SPMT function to an RCL function with converter state
 
@@ -108,6 +109,17 @@ pub fn convert_density_function<'a, 'm>(
                 t: rcl::Type::ArrayRef(Box::new(Type::F32), 16 * 16 * 256),
             },
         );
+    }
+
+    // add permutation tables as parameters
+    //let mut perm_tables = Vec::new();
+    for input in &spmt_df.permutation_table_inputs {
+        let param_name = permutation_table_var_name(input);
+        rcl_func.add_parameter(
+            param_name.clone(),
+            convert_type(&spmt::VariableType::PermutationTable),
+        );
+        //perm_tables.push(input.clone());
     }
 
     let density_inputs = Rc::new(density_inputs);

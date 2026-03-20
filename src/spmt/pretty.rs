@@ -253,6 +253,9 @@ impl<'m> PrettyPrint for Expression<'m> {
             Expression::Int(v) => {
                 write!(p.line, "{}", v).unwrap();
             }
+            Expression::Long(v) => {
+                write!(p.line, "{}", v).unwrap();
+            }
             Expression::FunctionCall {
                 function,
                 parameters,
@@ -329,6 +332,17 @@ impl<'m> PrettyPrint for Expression<'m> {
             }
             Expression::DensityVariable(density_input) => {
                 let name = p.anon_name(density_input.density_function, "density-function");
+                p.push(&name);
+            }
+            Expression::PermutationTable(perm_table_input) => {
+                let name = format!(
+                    "perm-table-{}-{}",
+                    perm_table_input.ident,
+                    perm_table_input
+                        .subident
+                        .as_ref()
+                        .unwrap_or(&"".to_string())
+                );
                 p.push(&name);
             }
             Expression::UnaryOp { op, operand } => {

@@ -79,6 +79,7 @@ pub enum Type {
 
     // Composite types
     Pointer(Box<Type>),
+    Ref(Box<Type>),
     Struct(String),
     Array(Box<Type>, usize),
     ArrayRef(Box<Type>, usize),
@@ -119,6 +120,7 @@ impl std::fmt::Display for Type {
             Type::Bool => write!(f, "bool"),
             Type::Void => write!(f, "()"),
             Type::Pointer(t) => write!(f, "*{}", t),
+            Type::Ref(t) => write!(f, "&{}", t),
             Type::Struct(name) => write!(f, "{}", name),
             Type::Array(t, size) => write!(f, "[{}; {}]", t, size),
             Type::ArrayRef(t, size) => write!(f, "&[{}; {}]", t, size),
@@ -203,7 +205,8 @@ pub enum Expression<'m> {
     Variable(Rc<Variable>),
 
     // Literal values
-    IntLiteral(i64),
+    I32Literal(i32),
+    I64Literal(i64),
     FloatLiteral(f64),
     BoolLiteral(bool),
 

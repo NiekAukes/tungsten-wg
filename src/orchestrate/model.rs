@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use crate::{orchestrate::Scale, spmt::model::Interned};
+use crate::{
+    orchestrate::Scale,
+    spmt::model::{Interned, PermutationTableInput},
+};
 
 // pub type ShaderRef = Interned<Shader>;
 pub type Ref<'a, T> = Interned<'a, T>;
@@ -17,6 +20,7 @@ pub struct Shader<'a> {
     pub name: String,
     pub source: String,
     pub inputs: Vec<ShaderDependency<'a>>,
+    pub permutation_tables: Vec<PermutationTableInput>,
 }
 
 pub struct Orchestration<'a> {

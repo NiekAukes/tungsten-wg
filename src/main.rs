@@ -32,7 +32,7 @@ pub fn main() {
     //config_load::load_all_configs(&mut data, "JJThunderToTheMax", None);
     config_load::load_all_configs(&mut data, "testmod", None);
     // reexport the config
-    config_load::reexport(&data, "reexport_t");
+    // config_load::reexport(&data, "reexport_t");
 
     let arena: bumpalo::Bump = bumpalo::Bump::with_capacity(1 * 1024 * 1024); // 1 MB initial capacity
     let mut mcdata = parse::MinecraftData::new(&arena, &data);

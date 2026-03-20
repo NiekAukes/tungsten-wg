@@ -5,12 +5,15 @@ use std::{
 };
 
 use crate::{
-    orchestrate::Scale, parse::model::{Density, DensityType, NormalNoise}, spmt::model::{
+    orchestrate::Scale,
+    parse::model::{Density, DensityType, NormalNoise},
+    spmt::model::{
         BinaryOperator, DensityFunction, DensityFunctionRef, DensityInput, Expression, Function,
-        FunctionRef, SPMT, Statement, Variable, VariableType,
-    }, transform_spmt::{
+        FunctionRef, PermutationTableInput, SPMT, Statement, Variable, VariableType,
+    },
+    transform_spmt::{
         BuilderState, DensityFunctionCache, NoiseCache, anonvar, newvar, noise::lower_normal_noise,
-    }
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -44,6 +47,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                 body: Vec::new(),
                 canonical_name: None,
                 density_inputs: Vec::new(),
+                permutation_table_inputs: Vec::new(),
                 variables: Vec::new(),
                 helper_functions: Vec::new(),
             },
@@ -147,20 +151,42 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         }
     }
 
-    pub fn lower_noise(&mut self, density: NormalNoise<'a>, scale: (f32, f32, f32)) -> FunctionRef<'m> {
+    pub fn lower_noise(
+        &mut self,
+        density: NormalNoise<'a>,
+        scale: (f32, f32, f32),
+        name: String,
+    ) -> (FunctionRef<'m>, Vec<PermutationTableInput>) {
         // lower the noise into a density function
-        let function = lower_normal_noise(density, None, scale, false);
+        let (mut function, perm_tables) = lower_normal_noise(density, name, scale, false);
+        // add the permutation tables to the function arguments
+        for perm_table in &perm_tables {
+            function.variables.push(Rc::new(Variable {
+                name: Some(format!(
+                    "{}_{}",
+                    perm_table.ident,
+                    perm_table.subident.as_ref().unwrap_or(&"".to_string())
+                )),
+                t: VariableType::PermutationTable,
+            }));
+        }
         let function = FunctionRef::new(self.arena.alloc(function));
-        function
+        (function, perm_tables)
     }
 
-    pub fn lower_noise_as_density(&mut self, density: NormalNoise<'a>, scale: (f32, f32, f32)) -> DensityFunctionRef<'m> {
+    pub fn lower_noise_as_density(
+        &mut self,
+        density: NormalNoise<'a>,
+        cname: String,
+        scale: (f32, f32, f32),
+    ) -> DensityFunctionRef<'m> {
         // lower the noise into a density function
-        let function = lower_normal_noise(density, None,scale, true);
+        let (function, perm_tables) = lower_normal_noise(density, cname, scale, true);
         let mut density_function = DensityFunction {
             body: function.body,
             canonical_name: function.canonical_name,
             density_inputs: vec![],
+            permutation_table_inputs: perm_tables,
             variables: function.variables,
             helper_functions: vec![],
         };
@@ -176,7 +202,13 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         density_function_ref
     }
 
-    pub fn lower_noise_and_mark(&mut self, noise: NormalNoise<'a>, xz_scale: f64, y_scale: f64) -> DensityInput<'m> {
+    pub fn lower_noise_and_mark(
+        &mut self,
+        noise: NormalNoise<'a>,
+        xz_scale: f64,
+        y_scale: f64,
+        name: String,
+    ) -> DensityInput<'m> {
         // check if we already have a density function for this noise
         // create a scaled noise struct to use as a key for the cache
         let noise_scaled = NormalNoiseScaled {
@@ -193,8 +225,11 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         let density_function_ref = if let Some(cached) = bs.noise_cache.get(&noise) {
             cached.clone()
         } else {
-            let density_function_ref = self.lower_noise_as_density(noise,
-                (xz_scale as f32, y_scale as f32, xz_scale as f32));
+            let density_function_ref = self.lower_noise_as_density(
+                noise,
+                name,
+                (xz_scale as f32, y_scale as f32, xz_scale as f32),
+            );
             bs.noise_cache.insert(noise, density_function_ref.clone());
             density_function_ref
         };
@@ -329,9 +364,14 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
 
     pub fn lower_density(&mut self, density: Density<'a>) -> Expression<'m> {
         match *density {
-            DensityType::Noise { noise, xz_scale, y_scale } => {
+            DensityType::Noise {
+                ref name,
+                noise,
+                xz_scale,
+                y_scale,
+            } => {
                 // A noise call specifically
-                let fref = self.lower_noise_and_mark(noise, xz_scale, y_scale);
+                let fref = self.lower_noise_and_mark(noise, xz_scale, y_scale, name.clone());
                 // use the density input as the expression
                 Expression::DensityVariable(fref)
             }
@@ -539,6 +579,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                 }
             }
             DensityType::ShiftedNoise {
+                ref name,
                 noise,
                 shift_x,
                 shift_y,
@@ -565,10 +606,17 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                 };
 
                 // 4. Lower noise but don't mark it, we just want the density function reference
-                let noise_function_ref = self.lower_noise(noise, 
-                    (xz_scale as f32, y_scale as f32, xz_scale as f32));
+                let (noise_function_ref, perm_tables) = self.lower_noise(
+                    noise,
+                    (xz_scale as f32, y_scale as f32, xz_scale as f32),
+                    name.clone(),
+                );
                 // add it as a helper function
                 self.helper_functions.push(noise_function_ref.clone());
+                // add the permutation tables to the current density function
+                self.density_function
+                    .permutation_table_inputs
+                    .extend(perm_tables);
 
                 Expression::FunctionCall {
                     function: noise_function_ref,
@@ -847,20 +895,21 @@ pub fn make_rpos3<'m>(
             right: Box::new(Expression::Variable(p)),
         };
     }
+
     Expression::BinaryOp {
-        op: BinaryOperator::Add,
-        left: Box::new(Expression::Variable(origin)),
-        right: Box::new(Expression::BinaryOp {
-            op: BinaryOperator::Multiply,
-            left: Box::new(Expression::Variable(p)),
-            right: Box::new(Expression::Construct {
-                t: VariableType::Vec3,
-                args: vec![
-                    Expression::Float(scale.0 as f64),
-                    Expression::Float(scale.1 as f64),
-                    Expression::Float(scale.2 as f64),
-                ],
-            }),
+        op: BinaryOperator::Multiply,
+        left: Box::new(Expression::BinaryOp {
+            op: BinaryOperator::Add,
+            left: Box::new(Expression::Variable(origin)),
+            right: Box::new(Expression::Variable(p)),
+        }),
+        right: Box::new(Expression::Construct {
+            t: VariableType::Vec3,
+            args: vec![
+                Expression::Float(scale.0 as f64),
+                Expression::Float(scale.1 as f64),
+                Expression::Float(scale.2 as f64),
+            ],
         }),
     }
 }

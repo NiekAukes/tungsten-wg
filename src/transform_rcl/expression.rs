@@ -10,6 +10,7 @@ use super::{RCLFunctionConverter, sanitize_name, types};
 use crate::rcl::{Parameter, model as rcl};
 use crate::spmt::model::{self as spmt, Addr, Interned};
 use crate::transform_rcl::function;
+use crate::transform_rcl::types::permutation_table_var_name;
 
 /// Convert an SPMT expression to an RCL expression
 
@@ -22,7 +23,8 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
                 rcl::Expression::Variable(rcl_var)
             }
             spmt::Expression::Float(val) => rcl::Expression::FloatLiteral(*val),
-            spmt::Expression::Int(val) => rcl::Expression::IntLiteral(*val as i64),
+            spmt::Expression::Int(val) => rcl::Expression::I32Literal(*val),
+            spmt::Expression::Long(val) => rcl::Expression::I64Literal(*val),
             spmt::Expression::BinaryOp { op, left, right } => {
                 let left = Box::new(self.convert_expression(left));
                 let right = Box::new(self.convert_expression(right));
@@ -135,6 +137,15 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
                     index: Box::new(onedposition),
                 }
             }
+            spmt::Expression::PermutationTable(input) => {
+                // similar to density variable, but we don't need to convert the position to a 1D index, we just pass the position as a Vec3
+                rcl::Expression::Variable(Rc::new(rcl::Variable {
+                    name: Some(permutation_table_var_name(input)),
+                    t: rcl::Type::Array(Box::new(rcl::Type::I8), 256), // permutation tables are passed as arrays of 256 i8s
+                    mutable: false,
+                }))
+            }
+
             // spmt::Expression::MakeVec3 { x, y, z } => {
             //     // make a function call to Vec3::new(x,y,z)
             //     let x = self.convert_expression(x);
@@ -161,7 +172,11 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
                     spmt::VariableType::I32 => panic!(
                         "Cannot construct I32 directly, it should be a literal or a variable"
                     ),
+                    spmt::VariableType::I64 => panic!(
+                        "Cannot construct I64 directly, it should be a literal or a variable"
+                    ),
                     spmt::VariableType::DensityInput => "DensityInput",
+                    spmt::VariableType::PermutationTable => "PermutationTable",
                 };
                 rcl::Expression::LateBoundCall {
                     function_name: format!("{}::new", type_name),
@@ -244,8 +259,8 @@ fn convert_vec3_to_position_expression<'m>(
         return_type: rcl::Type::F32,
         arguments: vec![
             p,
-            rcl::Expression::IntLiteral(dims.0 as i64),
-            rcl::Expression::IntLiteral(dims.1 as i64),
+            rcl::Expression::I32Literal(dims.0),
+            rcl::Expression::I32Literal(dims.1),
         ],
     }
 }

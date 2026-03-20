@@ -9,6 +9,7 @@ pub type Density<'m> = Interned<'m, DensityType<'m>>;
 pub enum DensityType<'m> {
     Const(f64),
     Noise {
+        name: String,
         noise: NormalNoise<'m>,
         xz_scale: f64,
         y_scale: f64,
@@ -52,6 +53,7 @@ pub enum DensityType<'m> {
     },
 
     ShiftedNoise {
+        name: String,
         noise: NormalNoise<'m>,
         shift_x: Density<'m>,
         shift_y: f64,
@@ -138,11 +140,13 @@ impl Hash for DensityType<'_> {
                 val.to_bits().hash(state);
             }
             DensityType::Noise {
+                name,
                 noise,
                 xz_scale,
                 y_scale,
             } => {
                 1.hash(state);
+                name.hash(state);
                 noise.hash(state);
                 xz_scale.to_bits().hash(state);
                 y_scale.to_bits().hash(state);
@@ -206,6 +210,7 @@ impl Hash for DensityType<'_> {
             }
 
             DensityType::ShiftedNoise {
+                name,
                 noise,
                 shift_x,
                 shift_y,
@@ -214,6 +219,7 @@ impl Hash for DensityType<'_> {
                 y_scale,
             } => {
                 12.hash(state);
+                name.hash(state);
                 noise.hash(state);
                 shift_x.hash(state);
                 shift_y.to_bits().hash(state);

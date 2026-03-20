@@ -95,9 +95,9 @@ impl<'a, 'm> Transformer<'a, 'm> {
                 .main_density_functions
                 .iter()
                 .any(|df| df.canonical_name == density_function.canonical_name)
-             {
+            {
                 self.final_model.density_functions.push(*density_function);
-            } 
+            }
             //self.final_model.density_functions.push(*density_function);
         }
         for noise in noise_cache.values() {

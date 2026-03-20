@@ -336,7 +336,8 @@ impl RustCodeGenerator {
     ) -> String {
         match expr {
             icl::Expression::Variable(var) => self.variable_to_string(var, p),
-            icl::Expression::IntLiteral(val) => format!("{}_i32", val),
+            icl::Expression::I32Literal(val) => format!("{}_i32", val),
+            icl::Expression::I64Literal(val) => format!("{}_i64", val),
             icl::Expression::FloatLiteral(val) => format!("{}_f32", val),
             icl::Expression::BoolLiteral(val) => format!("{}", val),
             icl::Expression::BinaryOp { op, left, right } => {
@@ -502,6 +503,7 @@ impl RustCodeGenerator {
             icl::Type::F64 => "f64".to_string(),
             icl::Type::Bool => "bool".to_string(),
             icl::Type::Void => "()".to_string(),
+            icl::Type::Ref(inner) => format!("&{}", self.type_to_rust_string(inner)),
             icl::Type::Pointer(inner) => {
                 format!("*const {}", self.type_to_rust_string(inner))
             }

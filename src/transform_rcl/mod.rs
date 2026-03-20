@@ -21,6 +21,8 @@ pub mod function;
 pub mod statement;
 pub mod types;
 
+pub const PERM_TABLES_STRUCT_NAME: &str = "PermutationTables";
+pub const PERLIN_NOISE_SAMPLER_STRUCT_NAME: &str = "PerlinNoiseSampler";
 /// Converter state for transforming SPMT to RCL
 pub struct RCLFunctionConverter<'m> {
     /// Maps SPMT variable addresses to RCL variables

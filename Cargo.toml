@@ -11,3 +11,4 @@ pollster = "0.3"
 bytemuck = { version = "1.15", features = ["derive"] }
 pest = "2.8.4"
 pest_derive = "2.8.4"
+md5 = "0.8.0"

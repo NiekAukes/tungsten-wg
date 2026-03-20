@@ -25,6 +25,7 @@ pub struct SPMT<'m> {
 pub struct DensityFunction<'m> {
     pub canonical_name: Option<String>,
     pub density_inputs: Vec<DensityInput<'m>>,
+    pub permutation_table_inputs: Vec<PermutationTableInput>,
     pub body: Vec<Statement<'m>>,
     pub variables: Vec<Rc<Variable>>,
     pub helper_functions: Vec<FunctionRef<'m>>,
@@ -50,6 +51,13 @@ pub struct DensityInput<'m> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PermutationTableInput {
+    pub ident: String,
+    pub subident: Option<String>,
+    pub subident_index: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Variable {
     pub name: Option<String>,
     pub t: VariableType,
@@ -58,20 +66,24 @@ pub struct Variable {
 #[derive(Clone, PartialEq, Copy, Eq)]
 pub enum VariableType {
     DensityInput,
+    PermutationTable,
     Vec3,
     Pos3,
     F32,
     I32,
+    I64,
 }
 
 impl Debug for VariableType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             VariableType::DensityInput => write!(f, "density"),
+            VariableType::PermutationTable => write!(f, "perm_table"),
             VariableType::Vec3 => write!(f, "vec3"),
             VariableType::Pos3 => write!(f, "pos3"),
             VariableType::F32 => write!(f, "f32"),
             VariableType::I32 => write!(f, "i32"),
+            VariableType::I64 => write!(f, "i64"),
         }
     }
 }
@@ -101,6 +113,7 @@ pub enum Expression<'m> {
     /// A literal value (e.g. number)
     Float(f64),
     Int(i32),
+    Long(i64),
     /// A Function call: function(parameters...)
     FunctionCall {
         function: FunctionRef<'m>,
@@ -116,6 +129,10 @@ pub enum Expression<'m> {
     /// A 'call' to another density function, with the given parameters.
     /// This is used to call other density functions from within a density function.
     DensityVariable(DensityInput<'m>),
+
+    // similar to density variable but for permutation tables,
+    // this is used to reference the permutation tables that are passed as arguments to noise functions
+    PermutationTable(PermutationTableInput),
 
     BinaryOp {
         op: BinaryOperator,

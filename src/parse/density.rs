@@ -29,7 +29,7 @@ impl<'m> DensityParseFunctions<'m> for MinecraftData<'m> {
                 if let Some(type_str) = type_value.as_str() {
                     match type_str {
                         "minecraft:noise" => {
-                            let noise = obj
+                            let noise_name = obj
                                 .get("noise")
                                 .and_then(|v| v.as_str())
                                 .expect("Missing noise field in minecraft:noise");
@@ -37,14 +37,15 @@ impl<'m> DensityParseFunctions<'m> for MinecraftData<'m> {
                             // noise is already defined, so just reference it
                             let noise = self
                                 .normal_noises
-                                .get(noise)
-                                .expect(&format!("Referenced noise not found: {}", noise));
+                                .get(noise_name)
+                                .expect(&format!("Referenced noise not found: {}", noise_name));
                             let xz_scale =
                                 obj.get("xz_scale").and_then(|v| v.as_f64()).unwrap_or(1.0);
                             let y_scale =
                                 obj.get("y_scale").and_then(|v| v.as_f64()).unwrap_or(1.0);
 
                             self.arena.alloc(DensityType::Noise {
+                                name: noise_name.to_string(),
                                 noise: *noise,
                                 xz_scale,
                                 y_scale,
@@ -171,7 +172,7 @@ impl<'m> DensityParseFunctions<'m> for MinecraftData<'m> {
                         }
 
                         "minecraft:shifted_noise" => {
-                            let noise = obj
+                            let noise_name = obj
                                 .get("noise")
                                 .and_then(|v| v.as_str())
                                 .expect("Missing noise field in minecraft:shifted_noise");
@@ -179,8 +180,8 @@ impl<'m> DensityParseFunctions<'m> for MinecraftData<'m> {
                             // noise is already defined, so just reference it
                             let noise = self
                                 .normal_noises
-                                .get(noise)
-                                .expect(&format!("Referenced noise not found: {}", noise));
+                                .get(noise_name)
+                                .expect(&format!("Referenced noise not found: {}", noise_name));
 
                             let shift_x_value = obj
                                 .get("shift_x")
@@ -201,6 +202,7 @@ impl<'m> DensityParseFunctions<'m> for MinecraftData<'m> {
                                 obj.get("y_scale").and_then(|v| v.as_f64()).unwrap_or(1.0);
 
                             self.arena.alloc(DensityType::ShiftedNoise {
+                                name: noise_name.to_string(),
                                 noise: *noise,
                                 shift_x,
                                 shift_y,
@@ -453,8 +455,8 @@ impl<'m> DensityParseFunctions<'m> for MinecraftData<'m> {
             if let Some(referenced) = self.density_functions.get(s) {
                 *referenced
             //} else if let Some(referenced) = self.normal_noises.get(s) {
-                // also allow referencing normal noises directly
-                //self.arena.alloc(DensityType::Noise(*referenced))
+            // also allow referencing normal noises directly
+            //self.arena.alloc(DensityType::Noise(*referenced))
             } else if let Some(referenced) = self.raw_data.density_functions.get(s) {
                 // also allow referencing density functions directly
                 let parsed = self.parse_density_function(referenced);
