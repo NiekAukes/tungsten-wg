@@ -113,6 +113,13 @@ impl<'m> OrchestrationConverter<'m> {
             Type::Struct(format!("&{}", PERM_TABLES_STRUCT_NAME)),
         );
 
+        for dep in &returns {
+            println!(
+                "Return dependency: shader {:?} with dimensions {:?}",
+                dep.shader.name, dep.dimensions
+            );
+        }
+
         let (output_struct, struct_fields) =
             output::build_return_struct(&returns, &shader_output_map);
         self.rcl_model

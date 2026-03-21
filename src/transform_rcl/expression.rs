@@ -9,8 +9,8 @@ use std::rc::Rc;
 use super::{RCLFunctionConverter, sanitize_name, types};
 use crate::rcl::{Parameter, model as rcl};
 use crate::spmt::model::{self as spmt, Addr, Interned};
-use crate::transform_rcl::function;
 use crate::transform_rcl::types::permutation_table_var_name;
+use crate::transform_rcl::{InputKey, function};
 
 /// Convert an SPMT expression to an RCL expression
 
@@ -72,7 +72,7 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
                 }
                 for (key, _) in self.density_function_inputs.as_ref() {
                     let v = self
-                        .get_variable(*key)
+                        .get_variable(key)
                         .expect("Density function input variable not found in converter");
                     arguments.push(rcl::Expression::Variable(v));
                 }
@@ -121,7 +121,7 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
                 // field of f32s, look up the parameter for this density function in the converter's density_function_inputs map
                 let function_param = self
                     .density_function_inputs
-                    .get(&input.density_function.addr())
+                    .get(&InputKey::from(input))
                     //.expect("Density function input not found in converter")
                     .cloned()
                     .unwrap_or(Parameter {

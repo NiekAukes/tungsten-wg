@@ -2,7 +2,7 @@ pub mod dot;
 pub mod model;
 pub mod transform;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Scale {
     x: u32,
     y: u32,
@@ -39,5 +39,31 @@ impl Flatten for (i32, i32, i32) {
 
     fn flatten(&self) -> Self::Output {
         self.0 * self.1 * self.2
+    }
+}
+
+impl From<(i32, i32, i32)> for Scale {
+    fn from(value: (i32, i32, i32)) -> Self {
+        Self {
+            x: value.0 as u32,
+            y: value.1 as u32,
+            z: value.2 as u32,
+        }
+    }
+}
+
+impl From<(f32, f32, f32)> for Scale {
+    fn from(value: (f32, f32, f32)) -> Self {
+        Self::new(value.0, value.1, value.2)
+    }
+}
+
+impl Default for Scale {
+    fn default() -> Self {
+        Self {
+            x: 65565,
+            y: 65565,
+            z: 65565,
+        }
     }
 }

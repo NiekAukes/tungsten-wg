@@ -18,8 +18,23 @@ pub fn transform_from_spmt<'a, 'm>(spmt: &SPMT<'a>, arena: &'m bumpalo::Bump) ->
     let orchestration = Orchestration::new(&arena);
 
     let mut transformer = Transformer::new(&arena, orchestration);
-    for density_function in &spmt.density_functions {
-        transformer.transform_density_function_to_shader(*density_function, (16, 256, 16));
+    for density_function in &spmt.main_density_functions {
+        let shader_ref =
+            transformer.transform_density_function_to_shader(*density_function, (16, 256, 16));
+        let shader_dependency = ShaderDependency {
+            shader: shader_ref,
+            scaled_origin: Scale::new(1.0, 1.0, 1.0),
+            dimensions: (16, 256, 16),
+        };
+        transformer
+            .orchestration
+            .main_shaders
+            .push(shader_dependency.clone());
+
+        // transformer
+        //     .orchestration
+        //     .main_shaders
+        //     .push(shader_dependency);
     }
     let orchestration = transformer.orchestration;
 
@@ -67,7 +82,7 @@ impl<'m, 'a> Transformer<'a, 'm> {
             inputs: dependencies,
             permutation_tables: density_function.permutation_table_inputs.clone(),
         };
-        let shader_ref = self.orchestration.add_main_shader(shader, dimensions);
+        let shader_ref = self.orchestration.add_shader(shader);
         self.cache.insert(density_function, shader_ref);
         shader_ref
     }
@@ -204,17 +219,6 @@ impl<'m> Orchestration<'m> {
     }
 
     pub fn get_primary_shaders(&self) -> Vec<ShaderDependency<'m>> {
-        // shaders that are not depended on by any other shader
-        let mut depended_on = HashSet::new();
-        for shader in &self.main_shaders {
-            for input in &shader.shader.inputs {
-                depended_on.insert(input.clone());
-            }
-        }
-        self.main_shaders
-            .iter()
-            .filter(|s| !depended_on.contains(s))
-            .cloned()
-            .collect()
+        self.main_shaders.clone()
     }
 }

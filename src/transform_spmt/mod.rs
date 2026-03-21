@@ -3,7 +3,7 @@ use std::{ops::Deref, rc::Rc};
 use crate::{
     parse::model::{Density, DensityType, NormalNoise},
     spmt::model::{DensityFunction, DensityFunctionRef, Expression, SPMT, Variable, VariableType},
-    transform_spmt::density::DensityBuilder,
+    transform_spmt::density::{DensityBuilder, NormalNoiseScaled},
 };
 
 pub mod density;
@@ -26,7 +26,7 @@ pub fn anonvar(t: VariableType) -> Rc<Variable> {
 }
 
 type DensityFunctionCache<'a, 'm> = std::collections::HashMap<Density<'a>, DensityFunctionRef<'m>>;
-type NoiseCache<'a, 'm> = std::collections::HashMap<NormalNoise<'a>, DensityFunctionRef<'m>>;
+type NoiseCache<'a, 'm> = std::collections::HashMap<NormalNoiseScaled<'a>, DensityFunctionRef<'m>>;
 
 pub struct BuilderState<'a, 'm> {
     pub density_function_cache: DensityFunctionCache<'a, 'm>,
@@ -74,6 +74,10 @@ impl<'a, 'm> Transformer<'a, 'm> {
                 .main_density_functions
                 .push(density_function);
             self.final_model.density_functions.push(density_function);
+            println!(
+                "Main density function: {:?}",
+                density_function.canonical_name
+            );
         }
 
         let BuilderState {

@@ -7,8 +7,10 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use super::{RCLFunctionConverter, sanitize_name, statement, types};
+use crate::orchestrate::Scale;
 use crate::rcl::{Parameter, Type, model as rcl};
 use crate::spmt::model::{self as spmt, Addr, Interned};
+use crate::transform_rcl::InputKey;
 use crate::transform_rcl::types::{convert_type, permutation_table_var_name};
 
 /// Convert an SPMT function to an RCL function with converter state
@@ -17,7 +19,7 @@ pub fn convert_function<'a, 'm>(
     spmt_func: &spmt::Function<'a>,
     arena: &'m bumpalo::Bump,
     already_converted_functions: HashMap<*const (), rcl::FunctionRef<'m>>,
-    density_inputs: Rc<HashMap<*const (), Parameter>>,
+    density_inputs: Rc<HashMap<InputKey, Parameter>>,
 ) -> (rcl::FunctionRef<'m>, RCLFunctionConverter<'m>) {
     let mut converter =
         RCLFunctionConverter::new_with_density_inputs(arena, density_inputs.clone());
@@ -103,7 +105,7 @@ pub fn convert_density_function<'a, 'm>(
             rcl::Type::ArrayRef(Box::new(Type::F32), dimensions as usize),
         );
         density_inputs.insert(
-            input.density_function.addr(),
+            InputKey::from(input),
             Parameter {
                 name: param_name,
                 t: rcl::Type::ArrayRef(Box::new(Type::F32), 16 * 16 * 256),

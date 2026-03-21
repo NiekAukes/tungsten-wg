@@ -13,8 +13,9 @@ The transformation is organized into focused sub-modules:
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use crate::orchestrate::Scale;
 use crate::rcl::model as rcl;
-use crate::spmt::model::{self as spmt, Addr, Interned};
+use crate::spmt::model::{self as spmt, Addr, DensityFunctionRef, DensityInput, Interned};
 
 pub mod expression;
 pub mod function;
@@ -26,12 +27,53 @@ pub const PERLIN_NOISE_SAMPLER_STRUCT_NAME: &str = "PerlinNoiseSampler";
 /// Converter state for transforming SPMT to RCL
 pub struct RCLFunctionConverter<'m> {
     /// Maps SPMT variable addresses to RCL variables
-    var_map: HashMap<*const (), Rc<rcl::Variable>>,
+    var_map: HashMap<InputKey, Rc<rcl::Variable>>,
     /// Counter for generating unique function names
     function_counter: usize,
     pub already_converted_functions: HashMap<*const (), rcl::FunctionRef<'m>>,
     arena: &'m bumpalo::Bump,
-    density_function_inputs: Rc<HashMap<*const (), rcl::Parameter>>,
+    density_function_inputs: Rc<HashMap<InputKey, rcl::Parameter>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct InputKey {
+    density_function: *const (),
+    dimensions: (i32, i32, i32),
+    scaled_origin: Scale,
+}
+
+impl<'m> InputKey {
+    pub fn new(
+        density_function: DensityFunctionRef<'m>,
+        dimensions: (i32, i32, i32),
+        scaled_origin: Scale,
+    ) -> Self {
+        InputKey {
+            density_function: density_function.addr(),
+            dimensions,
+            scaled_origin,
+        }
+    }
+}
+
+impl<'m> From<&DensityInput<'m>> for InputKey {
+    fn from(input: &DensityInput<'m>) -> Self {
+        InputKey {
+            density_function: input.density_function.addr(),
+            dimensions: input.dimensions,
+            scaled_origin: Scale::from(input.scaled_origin),
+        }
+    }
+}
+
+impl<'m> From<Rc<spmt::Variable>> for InputKey {
+    fn from(var: Rc<spmt::Variable>) -> Self {
+        InputKey {
+            density_function: var.addr(),
+            dimensions: (0, 0, 0),
+            scaled_origin: Scale::default(),
+        }
+    }
 }
 
 impl<'m> RCLFunctionConverter<'m> {
@@ -48,7 +90,7 @@ impl<'m> RCLFunctionConverter<'m> {
 
     pub fn new_with_density_inputs(
         arena: &'m bumpalo::Bump,
-        density_function_inputs: Rc<HashMap<*const (), rcl::Parameter>>,
+        density_function_inputs: Rc<HashMap<InputKey, rcl::Parameter>>,
     ) -> Self {
         let mut var_map = HashMap::new();
         for (key, param) in density_function_inputs.as_ref() {
@@ -71,9 +113,10 @@ impl<'m> RCLFunctionConverter<'m> {
 
     /// Get or create an RCL variable from an SPMT variable
     pub fn get_or_create_variable(&mut self, spmt_var: Rc<spmt::Variable>) -> Rc<rcl::Variable> {
-        let addr = spmt_var.addr();
+        //let addr = spmt_var.addr();
+        let key = InputKey::from(spmt_var.clone());
 
-        if let Some(var) = self.var_map.get(&addr) {
+        if let Some(var) = self.var_map.get(&key) {
             var.clone()
         } else {
             let rcl_var = Rc::new(rcl::Variable {
@@ -81,16 +124,16 @@ impl<'m> RCLFunctionConverter<'m> {
                 t: types::convert_type(&spmt_var.t),
                 mutable: true,
             });
-            self.var_map.insert(addr, rcl_var.clone());
+            self.var_map.insert(key, rcl_var.clone());
             rcl_var
         }
     }
 
-    pub fn get_variable(&self, addr: *const ()) -> Option<Rc<rcl::Variable>> {
-        self.var_map.get(&addr).cloned()
+    pub fn get_variable(&self, addr: &InputKey) -> Option<Rc<rcl::Variable>> {
+        self.var_map.get(addr).cloned()
     }
 
-    pub fn add_raw_variable(&mut self, addr: *const (), rcl_var: Rc<rcl::Variable>) {
+    pub fn add_raw_variable(&mut self, addr: InputKey, rcl_var: Rc<rcl::Variable>) {
         self.var_map.insert(addr, rcl_var);
     }
 
@@ -103,7 +146,7 @@ impl<'m> RCLFunctionConverter<'m> {
 
     /// Register a variable in the map
     pub fn register_variable(&mut self, spmt_var: Rc<spmt::Variable>, rcl_var: Rc<rcl::Variable>) {
-        self.var_map.insert(spmt_var.addr(), rcl_var);
+        self.var_map.insert(InputKey::from(spmt_var), rcl_var);
     }
 }
 

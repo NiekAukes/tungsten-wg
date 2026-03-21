@@ -188,8 +188,10 @@ impl<'m> DensityParseFunctions<'m> for MinecraftData<'m> {
                                 .expect("Missing shift_x field in minecraft:shifted_noise");
                             let shift_x = self.parse_density_function_from_value(shift_x_value);
 
-                            let shift_y =
-                                obj.get("shift_y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                            let shift_y_value = obj
+                                .get("shift_y")
+                                .expect("Missing shift_y field in minecraft:shifted_noise");
+                            let shift_y = self.parse_density_function_from_value(shift_y_value);
 
                             let shift_z_value = obj
                                 .get("shift_z")
@@ -216,18 +218,39 @@ impl<'m> DensityParseFunctions<'m> for MinecraftData<'m> {
                             let argument_value = obj
                                 .get("argument")
                                 .expect("Missing argument field in minecraft:shift_a");
-                            let argument = self.parse_density_function_from_value(argument_value);
 
-                            self.arena.alloc(DensityType::ShiftA { argument })
+                            let noise_name = argument_value
+                                .as_str()
+                                .expect("Missing noise field in minecraft:shift_a");
+                            // noise is already defined, so just reference it
+                            let noise = self
+                                .normal_noises
+                                .get(noise_name)
+                                .expect(&format!("Referenced noise not found: {}", noise_name));
+                            let name = noise_name.to_string();
+                            self.arena.alloc(DensityType::ShiftA {
+                                argument: *noise,
+                                name,
+                            })
                         }
 
                         "minecraft:shift_b" => {
                             let argument_value = obj
                                 .get("argument")
                                 .expect("Missing argument field in minecraft:shift_b");
-                            let argument = self.parse_density_function_from_value(argument_value);
-
-                            self.arena.alloc(DensityType::ShiftB { argument })
+                            let noise_name: &str = argument_value
+                                .as_str()
+                                .expect("Missing noise field in minecraft:shift_a");
+                            // noise is already defined, so just reference it
+                            let noise = self
+                                .normal_noises
+                                .get(noise_name)
+                                .expect(&format!("Referenced noise not found: {}", noise_name));
+                            let name = noise_name.to_string();
+                            self.arena.alloc(DensityType::ShiftB {
+                                argument: *noise,
+                                name,
+                            })
                         }
 
                         "minecraft:blend_offset" | "minecraft:blend_alpha" => {
@@ -483,11 +506,7 @@ impl<'m> DensityParseFunctions<'m> for MinecraftData<'m> {
         canonical_name: &str,
     ) -> Density<'m> {
         let mut density = self.parse_density_function_from_value(value);
-        if let DensityType::NamedDensityReference { argument, .. } = density {
-            // if the density is already a named reference, just return it
-            density = *argument;
-        }
-        // otherwise, create a new named reference with the given canonical name
+        // create a new named reference with the given canonical name
         let name = self.arena.alloc(canonical_name.to_string());
         self.arena.alloc(DensityType::NamedDensityReference {
             name,

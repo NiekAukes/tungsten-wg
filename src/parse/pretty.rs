@@ -18,7 +18,7 @@ impl<'m> DensityType<'m> {
             DensityType::Const(val) => {
                 writeln!(f, "{}Const({})", pad(indent), val)
             }
-            DensityType::Noise {..} => {
+            DensityType::Noise { .. } => {
                 writeln!(f, "{}Noise(...)", pad(indent))
             }
             DensityType::Add { left, right } => {
@@ -35,14 +35,16 @@ impl<'m> DensityType<'m> {
             | DensityType::Squeeze { argument }
             | DensityType::Interpolated { argument }
             | DensityType::FlatCache { argument }
-            | DensityType::ShiftA { argument }
-            | DensityType::ShiftB { argument }
             | DensityType::CacheOnce { argument }
             | DensityType::Abs { argument }
             | DensityType::Square { argument }
             | DensityType::Cube { argument } => {
                 writeln!(f, "{}{:?}:", pad(indent), self.variant_name())?;
                 argument.fmt_with_indent(f, indent + 2)
+            }
+
+            DensityType::ShiftA { .. } | DensityType::ShiftB { .. } => {
+                writeln!(f, "{}ShiftedNoise(...)", pad(indent))
             }
             DensityType::EndIslands => {
                 writeln!(f, "{}EndIslands", pad(indent))

@@ -56,7 +56,7 @@ pub enum DensityType<'m> {
         name: String,
         noise: NormalNoise<'m>,
         shift_x: Density<'m>,
-        shift_y: f64,
+        shift_y: Density<'m>,
         shift_z: Density<'m>,
         xz_scale: f64,
         y_scale: f64,
@@ -67,12 +67,14 @@ pub enum DensityType<'m> {
     // In effect: instead of sampling noise(x, y, z), the system samples noise(x + offset, y, z + offset)
     // where the offset comes from a secondary "shift" noise.
     ShiftA {
-        argument: Density<'m>,
+        argument: NormalNoise<'m>,
+        name: String,
     },
 
     // Similar to ShiftA, but shift_b applies different offsets to the coordinates.
     ShiftB {
-        argument: Density<'m>,
+        argument: NormalNoise<'m>,
+        name: String,
     },
 
     // marks the function as pure, and storing the result to be reused inside a computation
@@ -222,20 +224,22 @@ impl Hash for DensityType<'_> {
                 name.hash(state);
                 noise.hash(state);
                 shift_x.hash(state);
-                shift_y.to_bits().hash(state);
+                shift_y.hash(state);
                 shift_z.hash(state);
                 xz_scale.to_bits().hash(state);
                 y_scale.to_bits().hash(state);
             }
 
-            DensityType::ShiftA { argument } => {
+            DensityType::ShiftA { argument, name } => {
                 13.hash(state);
                 argument.hash(state);
+                name.hash(state);
             }
 
-            DensityType::ShiftB { argument } => {
+            DensityType::ShiftB { argument, name } => {
                 14.hash(state);
                 argument.hash(state);
+                name.hash(state);
             }
             DensityType::CacheOnce { argument } => {
                 15.hash(state);

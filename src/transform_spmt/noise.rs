@@ -14,6 +14,7 @@ const DOUBLE_PERLIN_OFFSET: f64 = 1.0181268882175227;
 
 pub fn lower_normal_noise<'m>(
     noise: NormalNoise,
+    permutation_name: &str,
     cname: String,
     scale: (f32, f32, f32),
     as_density: bool,
@@ -66,12 +67,12 @@ pub fn lower_normal_noise<'m>(
         // let noise_ident = random::xoroshiro_seed(&cname);
         // let perlin_ident = random::xoroshiro_seed(&format!("octave_{}", octave_id));
         let perm1 = PermutationTableInput {
-            ident: cname.clone(),
+            ident: permutation_name.to_string(),
             subident: Some(format!("octave_{}", octave_id)),
             subident_index: 0,
         };
         let perm2 = PermutationTableInput {
-            ident: cname.clone(),
+            ident: permutation_name.to_string(),
             subident: Some(format!("octave_{}", octave_id)),
             subident_index: 1,
         };

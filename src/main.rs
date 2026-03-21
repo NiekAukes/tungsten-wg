@@ -174,6 +174,13 @@ pub fn main() {
             already_converted_functions,
         );
         already_converted_functions = c.already_converted_functions;
+        println!(
+            "Converted density function {} to RCL",
+            density_function
+                .canonical_name
+                .clone()
+                .unwrap_or_else(|| "unknown".into())
+        );
     }
 
     let orchestration_conv = OrchestrationConverter::new(&rcl_arena);
