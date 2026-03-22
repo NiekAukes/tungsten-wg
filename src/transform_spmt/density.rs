@@ -69,6 +69,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                 s.p.clone(),
                 s.origin.clone(),
                 s.builder_state.as_ref().unwrap().working_scaled_origin,
+                s.builder_state.as_ref().unwrap().working_scaled_position,
             ),
         });
         s
@@ -151,13 +152,21 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
     pub fn lower_noise(
         &mut self,
         density: NormalNoise<'a>,
-        scale: (f32, f32, f32),
+        origin_scale: (f32, f32, f32),
+        position_scale: (f32, f32, f32),
         permutation_name: &str,
         name: String,
     ) -> (FunctionRef<'m>, Vec<PermutationTableInput>) {
         // lower the noise into a density function
-        let (mut function, perm_tables) =
-            lower_normal_noise(self.arena, density, permutation_name, name, scale, false);
+        let (mut function, perm_tables) = lower_normal_noise(
+            self.arena,
+            density,
+            permutation_name,
+            name,
+            origin_scale,
+            position_scale,
+            false,
+        );
         // add the permutation tables to the function arguments
         for perm_table in &perm_tables {
             function
@@ -181,11 +190,19 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         density: NormalNoise<'a>,
         permutation_name: &str,
         cname: String,
-        scale: (f32, f32, f32),
+        origin_scale: (f32, f32, f32),
+        position_scale: (f32, f32, f32),
     ) -> DensityFunctionRef<'m> {
         // lower the noise into a density function
-        let (function, perm_tables) =
-            lower_normal_noise(self.arena, density, permutation_name, cname, scale, true);
+        let (function, perm_tables) = lower_normal_noise(
+            self.arena,
+            density,
+            permutation_name,
+            cname,
+            origin_scale,
+            position_scale,
+            true,
+        );
         let mut density_function = DensityFunction {
             body: function.body,
             canonical_name: function.canonical_name,
@@ -231,20 +248,26 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         let density_function_ref = if let Some(cached) = bs.noise_cache.get(&noise_scaled) {
             cached.clone()
         } else {
-            let cname = format!("{}_{}", name, bs.noise_cache.len());
-            let density_function_ref = self.lower_noise_as_density(
-                noise,
-                &name,
-                cname,
-                (x_scale as f32, y_scale as f32, z_scale as f32),
+            let scaled_origin = (
+                bs.working_scaled_position.0 * x_scale as f32,
+                bs.working_scaled_position.1 * y_scale as f32,
+                bs.working_scaled_position.2 * z_scale as f32,
             );
+            let scaled_position = (
+                bs.working_scaled_position.0 * x_scale as f32,
+                bs.working_scaled_position.1 * y_scale as f32,
+                bs.working_scaled_position.2 * z_scale as f32,
+            );
+            let cname = format!("{}_{}", name, bs.noise_cache.len());
+            let density_function_ref =
+                self.lower_noise_as_density(noise, &name, cname, scaled_origin, scaled_position);
             bs.noise_cache
                 .insert(noise_scaled.clone(), density_function_ref.clone());
             density_function_ref
         };
         let v = anonvar(self.arena, VariableType::DensityInput);
         let dimensions = bs.working_dimensions;
-        let mut scaled_origin = bs.working_scaled_origin;
+        let mut scaled_origin = bs.working_scaled_position;
         scaled_origin.0 *= x_scale as f32;
         scaled_origin.1 *= y_scale as f32;
         scaled_origin.2 *= z_scale as f32;
@@ -309,7 +332,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         let density_function_ref = self._lower_density_shader_inner(density, canonical_name);
 
         let dimensions = self.builder_state.as_ref().unwrap().working_dimensions;
-        let scaled_origin = self.builder_state.as_ref().unwrap().working_scaled_origin;
+        let scaled_origin = self.builder_state.as_ref().unwrap().working_scaled_position;
         let v = anonvar(self.arena, VariableType::DensityInput);
         let input = DensityInput {
             var: v.clone(),
@@ -341,10 +364,10 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
 
         let mut bs = self.builder_state.take().unwrap();
         let old_dimensions = bs.working_dimensions;
-        let old_scaled_origin = bs.working_scaled_origin;
+        let old_scaled_origin = bs.working_scaled_position;
 
         bs.working_dimensions = dimensions;
-        bs.working_scaled_origin = scaled_origin;
+        bs.working_scaled_position = scaled_origin;
         self.builder_state = Some(bs);
 
         let density_function_ref = self._lower_density_shader_inner(density, canonical_name);
@@ -366,7 +389,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         // restore the old dimensions and scaled origin
         let mut bs = self.builder_state.take().unwrap();
         bs.working_dimensions = old_dimensions;
-        bs.working_scaled_origin = old_scaled_origin;
+        bs.working_scaled_position = old_scaled_origin;
         self.builder_state = Some(bs);
         input
     }
@@ -613,14 +636,24 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
 
                 let id = self.noise_inputs.len();
                 let cname = format!("{}_shifted_{}", name, id);
+                let bs = self.builder_state.take().unwrap();
+
+                let scaled_origin = (
+                    bs.working_scaled_position.0 * xz_scale as f32,
+                    bs.working_scaled_position.1 * y_scale as f32,
+                    bs.working_scaled_position.2 * xz_scale as f32,
+                );
+                let scaled_position = (
+                    bs.working_scaled_position.0 * xz_scale as f32,
+                    bs.working_scaled_position.1 * y_scale as f32,
+                    bs.working_scaled_position.2 * xz_scale as f32,
+                );
+
+                self.builder_state = Some(bs);
 
                 // 4. Lower noise but don't mark it, we just want the density function reference
-                let (noise_function_ref, perm_tables) = self.lower_noise(
-                    noise,
-                    (xz_scale as f32, y_scale as f32, xz_scale as f32),
-                    &name,
-                    cname,
-                );
+                let (noise_function_ref, perm_tables) =
+                    self.lower_noise(noise, scaled_origin, scaled_position, &name, cname);
                 // add it as a helper function
                 self.helper_functions.push(noise_function_ref.clone());
                 let perm_tables_args = perm_tables
@@ -673,12 +706,13 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                 //     DensityFunctionRef::new(self.arena.alloc(argument_density_function));
                 let old_dimensions = self.builder_state.as_ref().unwrap().working_dimensions;
                 let dimensions = (old_dimensions.0, 1, old_dimensions.2);
-                let old_scaled_origin = self.builder_state.as_ref().unwrap().working_scaled_origin;
+                let old_scaled_origin =
+                    self.builder_state.as_ref().unwrap().working_scaled_position;
                 let scaled_origin = (old_scaled_origin.0 / 4.0, 0.0, old_scaled_origin.2 / 4.0);
 
                 self.builder_state.as_mut().map(|bs| {
                     bs.working_dimensions = dimensions;
-                    bs.working_scaled_origin = scaled_origin;
+                    bs.working_scaled_position = scaled_origin;
                 });
 
                 //let density_input =
@@ -702,7 +736,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
 
                 self.builder_state.as_mut().map(|bs| {
                     bs.working_dimensions = old_dimensions;
-                    bs.working_scaled_origin = old_scaled_origin;
+                    bs.working_scaled_position = old_scaled_origin;
                 });
                 // let call = Expression::DensityFunctionCall {
                 //     function: argument_density_function_ref,
@@ -763,12 +797,13 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
 
                 let old_dimensions = self.builder_state.as_ref().unwrap().working_dimensions;
                 let dimensions = (old_dimensions.0, old_dimensions.1, 1);
-                let old_scaled_origin = self.builder_state.as_ref().unwrap().working_scaled_origin;
+                let old_scaled_origin =
+                    self.builder_state.as_ref().unwrap().working_scaled_position;
                 let scaled_origin = (old_scaled_origin.0 / 4.0, old_scaled_origin.1 / 4.0, 0.0);
 
                 self.builder_state.as_mut().map(|bs| {
                     bs.working_dimensions = dimensions;
-                    bs.working_scaled_origin = scaled_origin;
+                    bs.working_scaled_position = scaled_origin;
                 });
 
                 //let density_input =
@@ -793,7 +828,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
 
                 self.builder_state.as_mut().map(|bs| {
                     bs.working_dimensions = old_dimensions;
-                    bs.working_scaled_origin = old_scaled_origin;
+                    bs.working_scaled_position = old_scaled_origin;
                 });
 
                 let call = Expression::DensityVariable(density_input, Some(index));
@@ -963,46 +998,112 @@ pub fn make_clamp(input: Expression, min: f64, max: f64) -> Expression {
     }
 }
 
-pub fn make_rpos3<'m>(p: Var<'m>, origin: Var<'m>, scale: (f32, f32, f32)) -> Expression<'m> {
-    // rpos3 = origin + p * scale
-    if scale == (1.0, 1.0, 1.0) {
-        return Expression::BinaryOp {
-            op: BinaryOperator::Add,
-            left: Box::new(Expression::Variable(origin)),
-            right: Box::new(Expression::Variable(p)),
-        };
-    }
+pub fn make_rpos3<'m>(
+    p: Var<'m>,
+    origin: Var<'m>,
+    origin_scale: (f32, f32, f32),
+    position_scale: (f32, f32, f32),
+) -> Expression<'m> {
+    // // rpos3 = origin * origin_scale + p * position_scale
+    // if origin_scale == (1.0, 1.0, 1.0) {
+    //     return Expression::BinaryOp {
+    //         op: BinaryOperator::Add,
+    //         left: Box::new(Expression::Variable(origin)),
+    //         right: Box::new(Expression::Variable(p)),
+    //     };
+    // }
 
-    Expression::BinaryOp {
-        op: BinaryOperator::Multiply,
-        left: Box::new(Expression::BinaryOp {
-            op: BinaryOperator::Add,
-            left: Box::new(Expression::Variable(origin)),
-            right: Box::new(Expression::Variable(p)),
-        }),
-        right: Box::new(Expression::Construct {
-            t: VariableType::Vec3,
-            args: vec![
-                Expression::Float(scale.0 as f64),
-                Expression::Float(scale.1 as f64),
-                Expression::Float(scale.2 as f64),
-            ],
-        }),
-    }
     // Expression::BinaryOp {
-    //     op: BinaryOperator::Add,
-    //     left: Box::new(Expression::Variable(origin)),
-    //     right: Box::new(Expression::BinaryOp {
-    //         op: BinaryOperator::Multiply,
-    //         left: Box::new(Expression::Variable(p)),
-    //         right: Box::new(Expression::Construct {
-    //             t: VariableType::Vec3,
-    //             args: vec![
-    //                 Expression::Float(scale.0 as f64),
-    //                 Expression::Float(scale.1 as f64),
-    //                 Expression::Float(scale.2 as f64),
-    //             ],
-    //         }),
+    //     op: BinaryOperator::Multiply,
+    //     left: Box::new(Expression::BinaryOp {
+    //         op: BinaryOperator::Add,
+    //         left: Box::new(Expression::Variable(origin)),
+    //         right: Box::new(Expression::Variable(p)),
+    //     }),
+    //     right: Box::new(Expression::Construct {
+    //         t: VariableType::Vec3,
+    //         args: vec![
+    //             Expression::Float(scale.0 as f64),
+    //             Expression::Float(scale.1 as f64),
+    //             Expression::Float(scale.2 as f64),
+    //         ],
     //     }),
     // }
+
+    // a few cased:
+    // always scaled_origin + scaled_position
+    // scaled_origin is always origin * origin_scale
+    // scaled_position is always p * position_scale
+    // only calculate when the scale is not (1.0, 1.0, 1.0)
+    // essentially 4 cases:
+    // 1. both scales are (1.0, 1.0, 1.0), then rpos3 = origin + p
+    // 2. only origin_scale is not (1.0, 1.0, 1.0), then rpos3 = origin * origin_scale + p
+    // 3. only position_scale is not (1.0, 1.0, 1.0), then rpos3 = origin + p * position_scale
+    // 4. both scales are not (1.0, 1.0, 1.0), then rpos3 = origin * origin_scale + p * position_scale
+
+    if origin_scale == position_scale {
+        // the common case where both scales are the same, we can just do (origin + p) * scale
+        if origin_scale == (1.0, 1.0, 1.0) {
+            return Expression::BinaryOp {
+                op: BinaryOperator::Add,
+                left: Box::new(Expression::Variable(origin)),
+                right: Box::new(Expression::Variable(p)),
+            };
+        }
+        Expression::BinaryOp {
+            op: BinaryOperator::Multiply,
+            left: Box::new(Expression::BinaryOp {
+                op: BinaryOperator::Add,
+                left: Box::new(Expression::Variable(origin)),
+                right: Box::new(Expression::Variable(p)),
+            }),
+            right: Box::new(Expression::Construct {
+                t: VariableType::Vec3,
+                args: vec![
+                    Expression::Float(origin_scale.0 as f64),
+                    Expression::Float(origin_scale.1 as f64),
+                    Expression::Float(origin_scale.2 as f64),
+                ],
+            }),
+        }
+    } else {
+        // the more general case where the scales are different, we have to calculate both separately
+        let scaled_origin = if origin_scale == (1.0, 1.0, 1.0) {
+            Expression::Variable(origin)
+        } else {
+            Expression::BinaryOp {
+                op: BinaryOperator::Multiply,
+                left: Box::new(Expression::Variable(origin)),
+                right: Box::new(Expression::Construct {
+                    t: VariableType::Vec3,
+                    args: vec![
+                        Expression::Float(origin_scale.0 as f64),
+                        Expression::Float(origin_scale.1 as f64),
+                        Expression::Float(origin_scale.2 as f64),
+                    ],
+                }),
+            }
+        };
+        let scaled_position = if position_scale == (1.0, 1.0, 1.0) {
+            Expression::Variable(p)
+        } else {
+            Expression::BinaryOp {
+                op: BinaryOperator::Multiply,
+                left: Box::new(Expression::Variable(p)),
+                right: Box::new(Expression::Construct {
+                    t: VariableType::Vec3,
+                    args: vec![
+                        Expression::Float(position_scale.0 as f64),
+                        Expression::Float(position_scale.1 as f64),
+                        Expression::Float(position_scale.2 as f64),
+                    ],
+                }),
+            }
+        };
+        Expression::BinaryOp {
+            op: BinaryOperator::Add,
+            left: Box::new(scaled_origin),
+            right: Box::new(scaled_position),
+        }
+    }
 }

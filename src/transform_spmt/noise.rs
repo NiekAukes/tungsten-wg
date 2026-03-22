@@ -15,7 +15,8 @@ pub fn lower_normal_noise<'m>(
     noise: NormalNoise,
     permutation_name: &str,
     cname: String,
-    scale: (f32, f32, f32),
+    origin_scale: (f32, f32, f32),
+    position_scale: (f32, f32, f32),
     as_density: bool,
 ) -> (Function<'m>, Vec<PermutationTableInput>) {
     let mut variables = Vec::new();
@@ -33,7 +34,7 @@ pub fn lower_normal_noise<'m>(
         variables.push(rpos3.clone());
         body.push(Statement::Assign {
             target: rpos3.clone(),
-            value: make_rpos3(pos3.clone(), origin.clone(), scale),
+            value: make_rpos3(pos3.clone(), origin.clone(), origin_scale, position_scale),
         });
     }
 

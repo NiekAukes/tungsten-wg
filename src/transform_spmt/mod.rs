@@ -31,6 +31,7 @@ pub struct BuilderState<'a, 'm> {
     pub noise_cache: NoiseCache<'a, 'm>,
 
     working_dimensions: (i32, i32, i32),
+    working_scaled_position: (f32, f32, f32),
     working_scaled_origin: (f32, f32, f32),
 }
 
@@ -55,6 +56,7 @@ impl<'a, 'm> Transformer<'a, 'm> {
                 density_function_cache: std::collections::HashMap::new(),
                 noise_cache: std::collections::HashMap::new(),
                 working_dimensions: (0, 0, 0),
+                working_scaled_position: (1.0, 1.0, 1.0),
                 working_scaled_origin: (1.0, 1.0, 1.0),
             }),
         }
