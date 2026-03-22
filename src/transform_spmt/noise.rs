@@ -1,10 +1,8 @@
-use std::rc::Rc;
-
 use crate::{
     parse::model::NormalNoise,
     spmt::model::{
         BinaryOperator, DensityFunction, Expression, Function, PermutationTableInput, Statement,
-        Variable, VariableType,
+        Var, Variable, VariableType,
     },
     transform_spmt::{density::make_rpos3, newvar},
 };
@@ -13,6 +11,7 @@ const DOUBLE_PERLIN_NOISE_AMPLITUDE: f64 = 0.16666666666666666;
 const DOUBLE_PERLIN_OFFSET: f64 = 1.0181268882175227;
 
 pub fn lower_normal_noise<'m>(
+    arena: &'m bumpalo::Bump,
     noise: NormalNoise,
     permutation_name: &str,
     cname: String,
@@ -27,10 +26,10 @@ pub fn lower_normal_noise<'m>(
     /* -----------------------------
     Input position
     ----------------------------- */
-    let rpos3 = newvar("rpos3", VariableType::Vec3);
+    let rpos3 = newvar(arena, "rpos3", VariableType::Vec3);
     if as_density {
-        let origin = newvar("origin", VariableType::Vec3);
-        let pos3 = newvar("pos3", VariableType::Pos3);
+        let origin = newvar(arena, "origin", VariableType::Vec3);
+        let pos3 = newvar(arena, "pos3", VariableType::Pos3);
         variables.push(rpos3.clone());
         body.push(Statement::Assign {
             target: rpos3.clone(),
@@ -43,7 +42,7 @@ pub fn lower_normal_noise<'m>(
     let frequencies = filtered_frequency_amplitude_list(noise);
     let mut rpos3fxs = Vec::new();
     for (i, (freq, _, _)) in frequencies.iter().enumerate() {
-        let rpos3f = newvar(&format!("rpos3f{}", i), VariableType::Vec3);
+        let rpos3f = newvar(arena, &format!("rpos3f{}", i), VariableType::Vec3);
         body.push(Statement::Assign {
             target: rpos3f.clone(),
             value: Expression::BinaryOp {
@@ -62,7 +61,7 @@ pub fn lower_normal_noise<'m>(
     let mut noise_terms = Vec::new();
     let mut permutation_table_inputs = Vec::new();
     for (i, (_, amp, octave_id)) in frequencies.iter().enumerate() {
-        let n = newvar(&format!("n{}", octave_id), VariableType::F32);
+        let n = newvar(arena, &format!("n{}", octave_id), VariableType::F32);
 
         // let noise_ident = random::xoroshiro_seed(&cname);
         // let perlin_ident = random::xoroshiro_seed(&format!("octave_{}", octave_id));

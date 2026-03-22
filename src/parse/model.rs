@@ -3,6 +3,55 @@ use std::hash::{Hash, Hasher};
 
 use crate::parse::Interned;
 
+#[derive(Debug, Clone)]
+pub struct NoiseRouter<'m> {
+    pub barrier: DensitySource<'m>,
+    pub continents: DensitySource<'m>,
+    pub depth: DensitySource<'m>,
+    pub erosion: DensitySource<'m>,
+    pub final_density: DensitySource<'m>,
+    pub fluid_level_floodedness: DensitySource<'m>,
+    pub fluid_level_spread: DensitySource<'m>,
+    pub initial_density_without_jaggedness: DensitySource<'m>,
+    pub lava: DensitySource<'m>,
+    pub ridges: DensitySource<'m>,
+    pub temperature: DensitySource<'m>,
+    pub vegetation: DensitySource<'m>,
+    pub vein_gap: DensitySource<'m>,
+    pub vein_ridged: DensitySource<'m>,
+    pub vein_toggle: DensitySource<'m>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NoiseGeneratorSettings<'m> {
+    pub aquifers_enabled: bool,
+    pub default_block: String,
+    pub default_fluid: String,
+    pub default_fluid_level: i32,
+    pub disable_mob_generation: bool,
+    pub noise: NoiseSettings,
+    pub noise_router: NoiseRouter<'m>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct NoiseSettings {
+    pub height: i32,
+    pub min_y: i32,
+    pub size_horizontal: i32,
+    pub size_vertical: i32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum DensitySource<'m> {
+    MultiSamplingDensity {
+        density: Density<'m>,
+        dimensions: (i32, i32, i32),
+    },
+    SingleSamplingDensity {
+        density: Density<'m>,
+    },
+}
+
 pub type Density<'m> = Interned<'m, DensityType<'m>>;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -376,6 +425,15 @@ impl<'m> Hash for SplineValue<'m> {
             SplineValue::Spline(spline) => {
                 spline.hash(state);
             }
+        }
+    }
+}
+
+impl<'m> DensitySource<'m> {
+    pub fn get_density(&self) -> &Density<'m> {
+        match self {
+            DensitySource::MultiSamplingDensity { density, .. } => density,
+            DensitySource::SingleSamplingDensity { density } => density,
         }
     }
 }

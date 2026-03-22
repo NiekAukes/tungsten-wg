@@ -1,8 +1,6 @@
-use std::{ops::Deref, rc::Rc};
-
 use crate::{
-    parse::model::{Density, DensityType, NormalNoise},
-    spmt::model::{DensityFunction, DensityFunctionRef, Expression, SPMT, Variable, VariableType},
+    parse::model::{Density, DensitySource, DensityType, NoiseGeneratorSettings},
+    spmt::model::{DensityFunctionRef, Expression, SPMT, Var, Variable, VariableType},
     transform_spmt::density::{DensityBuilder, NormalNoiseScaled},
 };
 
@@ -14,15 +12,15 @@ fn lit(v: f64) -> Expression<'static> {
     Expression::Float(v)
 }
 
-pub fn newvar(name: &str, t: VariableType) -> Rc<Variable> {
-    Rc::new(Variable {
+pub fn newvar<'m>(arena: &'m bumpalo::Bump, name: &str, t: VariableType) -> Var<'m> {
+    Var::new(arena.alloc(Variable {
         name: Some(name.into()),
         t,
-    })
+    }))
 }
 
-pub fn anonvar(t: VariableType) -> Rc<Variable> {
-    Rc::new(Variable { name: None, t })
+pub fn anonvar<'m>(arena: &'m bumpalo::Bump, t: VariableType) -> Var<'m> {
+    Var::new(arena.alloc(Variable { name: None, t }))
 }
 
 type DensityFunctionCache<'a, 'm> = std::collections::HashMap<Density<'a>, DensityFunctionRef<'m>>;
@@ -43,7 +41,7 @@ pub struct Transformer<'a, 'm> {
 }
 
 impl<'a, 'm> Transformer<'a, 'm> {
-    pub fn new(arena: &'m bumpalo::Bump, initial_working_dimensions: (i32, i32, i32)) -> Self {
+    pub fn new(arena: &'m bumpalo::Bump) -> Self {
         Self {
             final_model: SPMT {
                 density_functions: Vec::new(),
@@ -56,28 +54,47 @@ impl<'a, 'm> Transformer<'a, 'm> {
             builder_state: Option::Some(BuilderState {
                 density_function_cache: std::collections::HashMap::new(),
                 noise_cache: std::collections::HashMap::new(),
-                working_dimensions: initial_working_dimensions,
+                working_dimensions: (0, 0, 0),
                 working_scaled_origin: (1.0, 1.0, 1.0),
             }),
         }
     }
 
-    pub fn transform(
-        mut self,
-        noise_generator: &'a crate::parse::NoiseGeneratorSettings<'a>,
-    ) -> SPMT<'m> {
+    pub fn transform(mut self, noise_generator: &'a NoiseGeneratorSettings<'a>) -> SPMT<'m> {
         // For each density function in the Minecraft data, lower it and add it to the final model
         for density in noise_generator.noise_router.all_densities() {
-            let density_function = self.lower_density_function(density);
-            //self.final_model.density_functions.push(density_function);
-            self.final_model
-                .main_density_functions
-                .push(density_function);
-            self.final_model.density_functions.push(density_function);
-            println!(
-                "Main density function: {:?}",
-                density_function.canonical_name
-            );
+            // set the working dimensions and scaled origin in the builder state based on the density source type
+
+            match density {
+                DensitySource::SingleSamplingDensity { density } => {
+                    {
+                        let bs = self.builder_state.as_mut().unwrap();
+                        bs.working_dimensions = (1, 1, 1);
+                    }
+
+                    // TODO: add single-sampling support in the density builder.
+                }
+                DensitySource::MultiSamplingDensity {
+                    density,
+                    dimensions,
+                } => {
+                    {
+                        let bs = self.builder_state.as_mut().unwrap();
+                        bs.working_dimensions = dimensions;
+                    }
+
+                    let density_function = self.lower_density_function(density);
+                    //self.final_model.density_functions.push(density_function);
+                    self.final_model
+                        .main_density_functions
+                        .push((density_function, dimensions));
+                    self.final_model.density_functions.push(density_function);
+                    println!(
+                        "Main density function: {:?}",
+                        density_function.canonical_name
+                    );
+                }
+            }
         }
 
         let BuilderState {
@@ -98,11 +115,10 @@ impl<'a, 'm> Transformer<'a, 'm> {
                 .final_model
                 .main_density_functions
                 .iter()
-                .any(|df| df.canonical_name == density_function.canonical_name)
+                .any(|df| df.0.canonical_name == density_function.canonical_name)
             {
                 self.final_model.density_functions.push(*density_function);
             }
-            //self.final_model.density_functions.push(*density_function);
         }
         for noise in noise_cache.values() {
             self.final_model.density_functions.push(*noise);

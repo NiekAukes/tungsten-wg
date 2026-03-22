@@ -114,6 +114,7 @@ pub fn make_output_buffer<'m>(
         t: Type::Struct(format!("Box<[f32; {}]>", dims)),
         mutable: true,
     });
+
     let declare = Statement::Declare {
         variable: output_var.clone(),
         init: Some(box_array(dims)),

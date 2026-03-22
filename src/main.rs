@@ -28,7 +28,7 @@ pub mod transform_rcl;
 
 pub fn main() {
     let mut data = config_load::MinecraftDataRaw::new();
-    //config_load::load_all_configs(&mut data, "vanilla_worldgen_1.21.1", None);
+    config_load::load_all_configs(&mut data, "vanilla_worldgen_1.21.1", None);
     //config_load::load_all_configs(&mut data, "JJThunderToTheMax", None);
     config_load::load_all_configs(&mut data, "testmod", None);
     // reexport the config
@@ -37,7 +37,6 @@ pub fn main() {
     let arena: bumpalo::Bump = bumpalo::Bump::with_capacity(1 * 1024 * 1024); // 1 MB initial capacity
     let mut mcdata = parse::MinecraftData::new(&arena, &data);
     mcdata.parse_from_raw();
-    //println!("Parsed Minecraft data: {:?}", mcdata);
     println!(
         "Parsed Minecraft data: {} density functions",
         mcdata.density_functions.len()
@@ -48,7 +47,7 @@ pub fn main() {
     );
 
     let transform_arena = bumpalo::Bump::with_capacity(1 * 1024 * 1024); // 1 MB initial capacity
-    let transformer = transform_spmt::Transformer::new(&transform_arena, (16, 256, 16));
+    let transformer = transform_spmt::Transformer::new(&transform_arena);
     //println!("noise seetings keys: {:?}", mcdata.noise_settings.keys());
     let noise_generator = mcdata.noise_settings.get("minecraft:overworld").unwrap();
     //println!("Transforming noise generator: {:?}", noise_generator);
@@ -75,7 +74,7 @@ pub fn main() {
     std::fs::create_dir_all("density_dags").expect("Unable to create directory");
     let mut i = 0;
     let mut name_cache_bor = Some(name_cache);
-    for density_function in &program.main_density_functions {
+    for (density_function, _) in &program.main_density_functions {
         let ddag_root = *density_function;
         let ddag = DensityDAG { root: ddag_root };
         let mut printer =
@@ -174,20 +173,23 @@ pub fn main() {
             already_converted_functions,
         );
         already_converted_functions = c.already_converted_functions;
-        println!(
-            "Converted density function {} to RCL",
-            density_function
-                .canonical_name
-                .clone()
-                .unwrap_or_else(|| "unknown".into())
-        );
     }
 
-    let orchestration_conv = OrchestrationConverter::new(&rcl_arena);
-    let orchestration_rcl = orchestration_conv.convert(
+    let mut orchestration_conv = OrchestrationConverter::new(&rcl_arena);
+    orchestration_conv.convert(
         orchestration.arrange_waves(),
         orchestration.get_primary_shaders(),
     );
+
+    // Generate a pruned orchestration function for each primary density
+    for primary in &orchestration.get_primary_shaders() {
+        let name = &primary.shader.name;
+        let pruned_waves = orchestration.arrange_waves_for(primary);
+
+        orchestration_conv.convert_single_entry(name, pruned_waves, primary);
+    }
+
+    let orchestration_rcl = orchestration_conv.finish();
 
     // write the RCL functions to a file in a different folder
     let folder = "../rcl_density";

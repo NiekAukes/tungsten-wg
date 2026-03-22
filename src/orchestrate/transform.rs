@@ -18,13 +18,12 @@ pub fn transform_from_spmt<'a, 'm>(spmt: &SPMT<'a>, arena: &'m bumpalo::Bump) ->
     let orchestration = Orchestration::new(&arena);
 
     let mut transformer = Transformer::new(&arena, orchestration);
-    for density_function in &spmt.main_density_functions {
-        let shader_ref =
-            transformer.transform_density_function_to_shader(*density_function, (16, 256, 16));
+    for (density_function, dims) in &spmt.main_density_functions {
+        let shader_ref = transformer.transform_density_function_to_shader(*density_function, *dims);
         let shader_dependency = ShaderDependency {
             shader: shader_ref,
             scaled_origin: Scale::new(1.0, 1.0, 1.0),
-            dimensions: (16, 256, 16),
+            dimensions: *dims,
         };
         transformer
             .orchestration
@@ -220,5 +219,50 @@ impl<'m> Orchestration<'m> {
 
     pub fn get_primary_shaders(&self) -> Vec<ShaderDependency<'m>> {
         self.main_shaders.clone()
+    }
+
+    /// Arrange waves for a single target shader dependency.
+    /// Only includes the transitive dependencies of `target` (plus `target` itself),
+    /// pruning all unrelated shaders from the DAG.
+    pub fn arrange_waves_for(
+        &self,
+        target: &ShaderDependency<'m>,
+    ) -> Vec<Vec<ShaderDependency<'m>>> {
+        // Build dependency map by walking from the single target
+        let mut dependencies: HashMap<ShaderDependency<'m>, Vec<ShaderDependency<'m>>> =
+            HashMap::new();
+        let mut agenda = vec![target.clone()];
+        while let Some(dep) = agenda.pop() {
+            if dependencies.contains_key(&dep) {
+                continue;
+            }
+            dependencies.insert(dep.clone(), Vec::new());
+            for input in &dep.shader.inputs {
+                agenda.push(input.clone());
+                dependencies.get_mut(&dep).unwrap().push(input.clone());
+            }
+        }
+
+        // Peel off waves (same algorithm as arrange_waves)
+        let mut arranged: Vec<Vec<ShaderDependency<'m>>> = Vec::new();
+        while dependencies.len() > 0 {
+            let mut wave: Vec<ShaderDependency<'m>> = Vec::new();
+            for (shader, deps) in &dependencies {
+                if deps.len() == 0 {
+                    wave.push(shader.clone());
+                }
+            }
+            if wave.len() == 0 {
+                panic!("Cyclic dependency detected in single-entry wave arrangement");
+            }
+            for shader in &wave {
+                dependencies.remove(shader);
+                for dependent in dependencies.values_mut() {
+                    dependent.retain(|s| s != shader);
+                }
+            }
+            arranged.push(wave);
+        }
+        arranged
     }
 }

@@ -1,16 +1,13 @@
 // transform_spmt/spline.rs
 
-use std::rc::Rc;
-
 use crate::transform_spmt::density::DensityBuilder;
-use crate::transform_spmt::{anonvar, newvar};
+use crate::transform_spmt::newvar;
 use crate::{
     parse::model::{Spline, SplinePoint, SplineValue},
     spmt::model::{
-        BinaryOperator, Expression, Function, FunctionRef, Statement, Variable, VariableType,
+        BinaryOperator, Expression, Function, FunctionRef, Statement, Var, Variable, VariableType,
     },
 };
-use bumpalo::Bump;
 
 impl<'a, 'm> DensityBuilder<'a, 'm> {
     pub fn lower_spline_definition(
@@ -24,14 +21,14 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
             body: Vec::new(),
             variables: Vec::new(),
         };
-        let p: Rc<Variable> = Rc::new(Variable {
+        let p: Var<'m> = Var::new(self.arena.alloc(Variable {
             name: self.p.name.clone(),
             t: self.p.t.clone(),
-        });
+        }));
         function.parameters.push(p.clone());
 
         // Compute coordinate
-        let coordinate = newvar("coordinate", VariableType::F32);
+        let coordinate = newvar(self.arena, "coordinate", VariableType::F32);
         function.variables.push(coordinate.clone());
 
         let old_function = self.switch_function(function);
@@ -52,7 +49,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         // -----------------------------------------
         // Build interpolation chain
         // -----------------------------------------
-        let r = self.build_spline_chain(&points, &p, &coordinate);
+        let r = self.build_spline_chain(&points, p, coordinate);
         let function: FunctionRef<'m> = self.finish_and_continue(r, old_function);
         function
     }
@@ -60,8 +57,8 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
     fn build_spline_chain(
         &mut self,
         points: &[SplinePoint<'a>],
-        p: &std::rc::Rc<Variable>,
-        input: &std::rc::Rc<Variable>,
+        p: Var<'m>,
+        input: Var<'m>,
     ) -> Expression<'m> {
         // Base case: one point → extrapolation
         if points.len() == 1 {
@@ -90,11 +87,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         return self.build_spline_chain(&points[1..], p, input);
     }
 
-    fn lower_spline_value_expr(
-        &mut self,
-        value: &SplineValue<'a>,
-        p: &std::rc::Rc<Variable>,
-    ) -> Expression<'m> {
+    fn lower_spline_value_expr(&mut self, value: &SplineValue<'a>, p: Var<'m>) -> Expression<'m> {
         match value {
             SplineValue::Const(c) => Expression::Float(*c),
 
@@ -114,8 +107,8 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
     fn make_extrapolation(
         &mut self,
         point: &SplinePoint<'a>,
-        p: &std::rc::Rc<Variable>,
-        input: &std::rc::Rc<Variable>,
+        p: Var<'m>,
+        input: Var<'m>,
     ) -> Expression<'m> {
         Expression::BinaryOp {
             op: BinaryOperator::Add,
@@ -136,8 +129,8 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         &mut self,
         first: &SplinePoint<'a>,
         second: &SplinePoint<'a>,
-        p: &std::rc::Rc<Variable>,
-        input: &std::rc::Rc<Variable>,
+        p: Var<'m>,
+        input: Var<'m>,
     ) -> Statement<'m> {
         let t = Expression::BinaryOp {
             op: BinaryOperator::Divide,

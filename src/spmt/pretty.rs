@@ -330,9 +330,14 @@ impl<'m> PrettyPrint for Expression<'m> {
                 right.pretty(p);
                 p.push(")");
             }
-            Expression::DensityVariable(density_input) => {
+            Expression::DensityVariable(density_input, index) => {
                 let name = p.anon_name(density_input.density_function, "density-function");
                 p.push(&name);
+                if let Some(index_expr) = index {
+                    p.push("[");
+                    index_expr.pretty(p);
+                    p.push("]");
+                }
             }
             Expression::PermutationTable(perm_table_input) => {
                 let name = format!(

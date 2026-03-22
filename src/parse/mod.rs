@@ -12,8 +12,10 @@ use crate::{
     config_load::MinecraftDataRaw,
     parse::{
         density::DensityParseFunctions,
-        model::Spline,
-        model::{Density, NormalNoise, NormalNoiseType},
+        model::{
+            Density, DensitySource, NoiseGeneratorSettings, NoiseRouter, NoiseSettings,
+            NormalNoise, NormalNoiseType, Spline,
+        },
     },
 };
 
@@ -142,44 +144,6 @@ worldgen/processor_list → StructureProcessorList (for structure block modifica
   },
 */
 
-#[derive(Debug, Clone)]
-pub struct NoiseRouter<'m> {
-    pub barrier: Density<'m>,
-    pub continents: Density<'m>,
-    pub depth: Density<'m>,
-    pub erosion: Density<'m>,
-    pub final_density: Density<'m>,
-    pub fluid_level_floodedness: Density<'m>,
-    pub fluid_level_spread: Density<'m>,
-    pub initial_density_without_jaggedness: Density<'m>,
-    pub lava: Density<'m>,
-    pub ridges: Density<'m>,
-    pub temperature: Density<'m>,
-    pub vegetation: Density<'m>,
-    pub vein_gap: Density<'m>,
-    pub vein_ridged: Density<'m>,
-    pub vein_toggle: Density<'m>,
-}
-
-#[derive(Debug, Clone)]
-pub struct NoiseGeneratorSettings<'m> {
-    pub aquifers_enabled: bool,
-    pub default_block: String,
-    pub default_fluid: String,
-    pub default_fluid_level: i32,
-    pub disable_mob_generation: bool,
-    pub noise: NoiseSettings,
-    pub noise_router: NoiseRouter<'m>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct NoiseSettings {
-    pub height: i32,
-    pub min_y: i32,
-    pub size_horizontal: i32,
-    pub size_vertical: i32,
-}
-
 // #[derive(Serialize, Deserialize, Debug, Clone)]
 // pub struct SlideSettings {
 //     pub target: i32,
@@ -239,10 +203,10 @@ impl<'m> MinecraftData<'m> {
 
         // parsing these is not necessarily needed, as they are just imports
         // but it's useful for debugging
-        for (name, json_str) in &raw.density_functions {
-            let parsed = self.parse_density_function(&json_str);
-            self.density_functions.insert(name.to_string(), parsed);
-        }
+        // for (name, json_str) in &raw.density_functions {
+        //     let parsed = self.parse_density_function(&json_str);
+        //     self.density_functions.insert(name.to_string(), parsed);
+        // }
     }
 
     fn parse_noise_settings(
@@ -286,7 +250,7 @@ impl<'m> MinecraftData<'m> {
         let noise_router_value = value
             .get("noise_router")
             .expect("noise_router field missing");
-        let noise_router = self.parse_noise_router(noise_router_value);
+        let noise_router = self.parse_noise_router(noise_router_value, &noise);
 
         Ok(NoiseGeneratorSettings {
             aquifers_enabled,
@@ -299,7 +263,11 @@ impl<'m> MinecraftData<'m> {
         })
     }
 
-    fn parse_noise_router(&self, value: &serde_json::Value) -> NoiseRouter<'m> {
+    fn parse_noise_router(
+        &self,
+        value: &serde_json::Value,
+        settings: &NoiseSettings,
+    ) -> NoiseRouter<'m> {
         let barrier = if let Some(barrier_value) = value.get("barrier") {
             self.parse_density_function_from_value_and_name(barrier_value, "barrier")
         } else {
@@ -390,27 +358,46 @@ impl<'m> MinecraftData<'m> {
             panic!("Missing vein_toggle field in noise_router")
         };
         NoiseRouter {
-            barrier,
-            continents,
-            depth,
-            erosion,
-            final_density,
-            fluid_level_floodedness,
-            fluid_level_spread,
-            initial_density_without_jaggedness,
-            lava,
-            ridges,
-            temperature,
-            vegetation,
-            vein_gap,
-            vein_ridged,
-            vein_toggle,
+            barrier: DensitySource::SingleSamplingDensity { density: barrier },
+            continents: DensitySource::SingleSamplingDensity {
+                density: continents,
+            },
+            depth: DensitySource::SingleSamplingDensity { density: depth },
+            erosion: DensitySource::SingleSamplingDensity { density: erosion },
+            final_density: DensitySource::MultiSamplingDensity {
+                density: final_density,
+                dimensions: (16, settings.height, 16),
+            },
+            fluid_level_floodedness: DensitySource::SingleSamplingDensity {
+                density: fluid_level_floodedness,
+            },
+            fluid_level_spread: DensitySource::SingleSamplingDensity {
+                density: fluid_level_spread,
+            },
+            initial_density_without_jaggedness: DensitySource::SingleSamplingDensity {
+                density: initial_density_without_jaggedness,
+            },
+            lava: DensitySource::SingleSamplingDensity { density: lava },
+            ridges: DensitySource::SingleSamplingDensity { density: ridges },
+            temperature: DensitySource::SingleSamplingDensity {
+                density: temperature,
+            },
+            vegetation: DensitySource::SingleSamplingDensity {
+                density: vegetation,
+            },
+            vein_gap: DensitySource::SingleSamplingDensity { density: vein_gap },
+            vein_ridged: DensitySource::SingleSamplingDensity {
+                density: vein_ridged,
+            },
+            vein_toggle: DensitySource::SingleSamplingDensity {
+                density: vein_toggle,
+            },
         }
     }
 }
 
 impl<'m> NoiseRouter<'m> {
-    pub fn all_densities(&self) -> Vec<Density<'m>> {
+    pub fn all_densities(&self) -> Vec<DensitySource<'m>> {
         vec![
             self.barrier,
             self.continents,

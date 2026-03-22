@@ -107,15 +107,19 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
                     arguments,
                 }
             }
-            spmt::Expression::DensityVariable(input) => {
-                let onedposition = convert_vec3_to_position_expression(
-                    rcl::Expression::Variable(Rc::new(rcl::Variable {
-                        name: Some("pos3".to_string()),
-                        t: rcl::Type::Struct("Pos3".to_string()),
-                        mutable: false,
-                    })),
-                    input.dimensions,
-                );
+            spmt::Expression::DensityVariable(input, index) => {
+                let onedposition = if index.is_some() {
+                    self.convert_expression(index.as_ref().unwrap())
+                } else {
+                    convert_vec3_to_position_expression(
+                        rcl::Expression::Variable(Rc::new(rcl::Variable {
+                            name: Some("pos3".to_string()),
+                            t: rcl::Type::Struct("Pos3".to_string()),
+                            mutable: false,
+                        })),
+                        input.dimensions,
+                    )
+                };
 
                 // the function is a density function, which is passed as a
                 // field of f32s, look up the parameter for this density function in the converter's density_function_inputs map

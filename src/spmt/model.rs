@@ -15,8 +15,10 @@ use std::{
 pub struct SPMT<'m> {
     pub density_functions: Vec<DensityFunctionRef<'m>>,
     pub functions: Vec<FunctionRef<'m>>,
-    pub main_density_functions: Vec<DensityFunctionRef<'m>>,
+    pub main_density_functions: Vec<(DensityFunctionRef<'m>, (i32, i32, i32))>,
 }
+
+pub type Var<'m> = Interned<'m, Variable>;
 
 /// A density function is a function that takes in x, y, z coordinates and returns a density value.
 /// its signature is at least f(position: Vec3) -> f32
@@ -27,16 +29,16 @@ pub struct DensityFunction<'m> {
     pub density_inputs: Vec<DensityInput<'m>>,
     pub permutation_table_inputs: Vec<PermutationTableInput>,
     pub body: Vec<Statement<'m>>,
-    pub variables: Vec<Rc<Variable>>,
+    pub variables: Vec<Var<'m>>,
     pub helper_functions: Vec<FunctionRef<'m>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Function<'m> {
     pub canonical_name: Option<String>,
-    pub parameters: Vec<Rc<Variable>>,
+    pub parameters: Vec<Var<'m>>,
     pub body: Vec<Statement<'m>>,
-    pub variables: Vec<Rc<Variable>>,
+    pub variables: Vec<Var<'m>>,
 }
 
 pub type DensityFunctionRef<'m> = Interned<'m, DensityFunction<'m>>;
@@ -44,7 +46,7 @@ pub type FunctionRef<'m> = Interned<'m, Function<'m>>;
 
 #[derive(PartialEq, Debug, Clone)]
 pub struct DensityInput<'m> {
-    pub var: Rc<Variable>,
+    pub var: Var<'m>,
     pub density_function: DensityFunctionRef<'m>,
     pub scaled_origin: (f32, f32, f32),
     pub dimensions: (i32, i32, i32),
@@ -91,7 +93,7 @@ impl Debug for VariableType {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement<'m> {
     Assign {
-        target: Rc<Variable>,
+        target: Var<'m>,
         value: Expression<'m>,
     },
     Return(Expression<'m>),
@@ -109,7 +111,7 @@ pub enum Statement<'m> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression<'m> {
     /// A variable reference
-    Variable(Rc<Variable>),
+    Variable(Var<'m>),
     /// A literal value (e.g. number)
     Float(f64),
     Int(i32),
@@ -128,7 +130,8 @@ pub enum Expression<'m> {
     },
     /// A 'call' to another density function, with the given parameters.
     /// This is used to call other density functions from within a density function.
-    DensityVariable(DensityInput<'m>),
+    /// Optionally, the caller can pass in an index for the called density for reading.
+    DensityVariable(DensityInput<'m>, Option<Box<Expression<'m>>>),
 
     // similar to density variable but for permutation tables,
     // this is used to reference the permutation tables that are passed as arguments to noise functions
@@ -232,7 +235,7 @@ impl<'m> Function<'m> {
         self.body.push(statement);
     }
 
-    pub fn add_variable(&mut self, variable: Rc<Variable>) {
+    pub fn add_variable(&mut self, variable: Var<'m>) {
         self.variables.push(variable);
     }
 }
@@ -241,7 +244,7 @@ impl<'m> DensityFunction<'m> {
     pub fn add_statement(&mut self, statement: Statement<'m>) {
         self.body.push(statement);
     }
-    pub fn add_variable(&mut self, variable: Rc<Variable>) {
+    pub fn add_variable(&mut self, variable: Var<'m>) {
         self.variables.push(variable);
     }
 }

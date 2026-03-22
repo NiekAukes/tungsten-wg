@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use super::{RCLFunctionConverter, sanitize_name, statement, types};
-use crate::orchestrate::Scale;
+use crate::orchestrate::{Flatten, Scale};
 use crate::rcl::{Parameter, Type, model as rcl};
 use crate::spmt::model::{self as spmt, Addr, Interned};
 use crate::transform_rcl::InputKey;
@@ -108,7 +108,7 @@ pub fn convert_density_function<'a, 'm>(
             InputKey::from(input),
             Parameter {
                 name: param_name,
-                t: rcl::Type::ArrayRef(Box::new(Type::F32), 16 * 16 * 256),
+                t: rcl::Type::ArrayRef(Box::new(Type::F32), input.dimensions.flatten() as usize),
             },
         );
     }

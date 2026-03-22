@@ -66,8 +66,8 @@ impl<'m> From<&DensityInput<'m>> for InputKey {
     }
 }
 
-impl<'m> From<Rc<spmt::Variable>> for InputKey {
-    fn from(var: Rc<spmt::Variable>) -> Self {
+impl<'m> From<spmt::Var<'m>> for InputKey {
+    fn from(var: spmt::Var<'m>) -> Self {
         InputKey {
             density_function: var.addr(),
             dimensions: (0, 0, 0),
@@ -112,9 +112,9 @@ impl<'m> RCLFunctionConverter<'m> {
     }
 
     /// Get or create an RCL variable from an SPMT variable
-    pub fn get_or_create_variable(&mut self, spmt_var: Rc<spmt::Variable>) -> Rc<rcl::Variable> {
+    pub fn get_or_create_variable(&mut self, spmt_var: spmt::Var<'_>) -> Rc<rcl::Variable> {
         //let addr = spmt_var.addr();
-        let key = InputKey::from(spmt_var.clone());
+        let key = InputKey::from(spmt_var);
 
         if let Some(var) = self.var_map.get(&key) {
             var.clone()
@@ -145,7 +145,7 @@ impl<'m> RCLFunctionConverter<'m> {
     }
 
     /// Register a variable in the map
-    pub fn register_variable(&mut self, spmt_var: Rc<spmt::Variable>, rcl_var: Rc<rcl::Variable>) {
+    pub fn register_variable(&mut self, spmt_var: spmt::Var<'_>, rcl_var: Rc<rcl::Variable>) {
         self.var_map.insert(InputKey::from(spmt_var), rcl_var);
     }
 }
