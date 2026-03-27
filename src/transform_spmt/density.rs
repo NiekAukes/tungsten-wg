@@ -102,7 +102,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
     }
 
     pub fn finish(
-        self,
+        mut self,
         ret: Expression<'m>,
     ) -> (
         DensityFunction<'m>,
@@ -115,7 +115,11 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
 
         // if the function name is None, generate a unique name based on the address of the function
         if function.canonical_name.is_none() {
-            let a = self.arena.alloc(());
+            let a = self
+                .builder_state
+                .as_mut()
+                .expect("Builder state is not initialized")
+                .use_density_counter();
             let id = a as *const () as usize;
             function.canonical_name = Some(format!("density_function_{}", id));
         }
@@ -567,14 +571,13 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
 
                 // flat caches are always lowered as separate density functions
                 let input = self.lower_density_input(argument, None);
+                // add to cache
+                self.add_density_to_cache(density, input.clone());
 
                 let mut bs = self.builder_state.take().unwrap();
                 bs.working_dimensions = old_dimensions;
                 bs.working_scaled_position = old_scaled_position;
                 self.builder_state = Some(bs);
-
-                // add to cache
-                self.add_density_to_cache(density, input.clone());
 
                 // perform actual interpolation logic
                 // in the form of interpolate444(
@@ -691,15 +694,14 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
 
                 // flat caches are always lowered as separate density functions
                 let input = self.lower_density_input(argument, None);
+                // add to cache
+                self.add_density_to_cache(density, input.clone());
 
                 let mut bs = self.builder_state.take().unwrap();
                 bs.working_dimensions = old_dimensions;
                 bs.working_scaled_position = old_scaled_position;
                 bs.working_scaled_origin = old_scaled_origin;
                 self.builder_state = Some(bs);
-
-                // add to cache
-                self.add_density_to_cache(density, input.clone());
 
                 // return the density variable for the input, with an index of (x >> 2, z >> 2)
                 Expression::DensityVariable(

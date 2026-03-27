@@ -196,6 +196,7 @@ pub enum Statement<'m> {
 
     // Block scope
     Block(Vec<Statement<'m>>),
+    InlineRust(String),
 }
 
 /// Expressions produce values

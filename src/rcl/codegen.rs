@@ -325,6 +325,10 @@ impl RustCodeGenerator {
                 p.push(&value_str);
                 p.line(";");
             }
+
+            icl::Statement::InlineRust(s) => {
+                p.line(s);
+            }
         }
     }
 

@@ -23,6 +23,8 @@ pub mod orchestrate;
 pub mod transform_spmt;
 
 pub mod rcl;
+pub mod transform_naga;
+pub mod transform_orchestration_gpu;
 pub mod transform_orchestration_rcl;
 pub mod transform_rcl;
 
@@ -30,7 +32,7 @@ pub fn main() {
     let mut data = config_load::MinecraftDataRaw::new();
     config_load::load_all_configs(&mut data, "vanilla_worldgen_1.21.1", None);
     //config_load::load_all_configs(&mut data, "JJThunderToTheMax", None);
-    //config_load::load_all_configs(&mut data, "testmod", None);
+    config_load::load_all_configs(&mut data, "testmod", None);
     // reexport the config
     // config_load::reexport(&data, "reexport_t");
 
@@ -212,6 +214,58 @@ pub fn main() {
         .expect("Unable to write file");
     std::fs::write(format!("{}/src/orchestration.rs", folder), orch_output)
         .expect("Unable to write file");
+
+    // transform to Naga IR and write WGSL shaders (one per density function)
+    let helpers = transform_naga::parse_helpers();
+    let naga_modules =
+        transform_naga::convert_spmt_to_naga(&program, transform_naga::Precision::F32, helpers);
+
+    // delete and recreate the shaders folder
+
+    // delete if it exists
+    if std::path::Path::new(&format!("{}/shaders", folder)).exists() {
+        std::fs::remove_dir_all(&format!("{}/shaders", folder))
+            .expect("Unable to delete shaders directory");
+    }
+    std::fs::create_dir_all(&format!("{}/shaders", folder))
+        .expect("Unable to create shaders directory");
+
+    for (name, naga_module) in &naga_modules {
+        let mut validator = naga::valid::Validator::new(
+            naga::valid::ValidationFlags::empty(),
+            naga::valid::Capabilities::all(),
+        );
+
+        let naga_module = naga_module.replace(naga::Module::default());
+
+        match validator.validate(&naga_module) {
+            Ok(info) => {
+                let mut wgsl_writer = naga::back::wgsl::Writer::new(
+                    String::new(),
+                    naga::back::wgsl::WriterFlags::empty(),
+                );
+                match wgsl_writer.write(&naga_module, &info) {
+                    Ok(()) => {
+                        let wgsl = wgsl_writer.finish();
+                        let file_path = format!("{}/shaders/{}.wgsl", folder, name);
+                        std::fs::write(&file_path, &wgsl).expect("Unable to write WGSL file");
+                        println!(
+                            "Generated WGSL shader '{}' with {} functions ({} bytes)",
+                            file_path,
+                            naga_module.functions.len(),
+                            wgsl.len()
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to write WGSL for '{}': {}", name, e);
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Naga validation failed for '{}': {:?}", name, e);
+            }
+        }
+    }
 }
 
 #[cfg(test)]

@@ -12,3 +12,4 @@ bytemuck = { version = "1.15", features = ["derive"] }
 pest = "2.8.4"
 pest_derive = "2.8.4"
 md5 = "0.8.0"
+naga = { version = "29.0.0", features = ["wgsl-out", "wgsl-in"] }
