@@ -356,15 +356,10 @@ impl<'m> DensityParseFunctions<'m> for MinecraftData<'m> {
                                 .get("argument")
                                 .expect("Missing argument field in minecraft:quarter_negative");
                             let argument = self.parse_density_function_from_value(argument_value);
-                            let zero = self.arena.alloc(DensityType::Const(0.0));
-                            let min = self.arena.alloc(DensityType::Min {
-                                left: argument,
-                                right: zero,
-                            });
-                            let factor = self.arena.alloc(DensityType::Const(0.25));
-                            self.arena.alloc(DensityType::Multiply {
-                                left: min,
-                                right: factor,
+
+                            self.arena.alloc(DensityType::XNegative {
+                                argument,
+                                neg_x_multiplier: 0.25,
                             })
                         }
 
@@ -377,17 +372,10 @@ impl<'m> DensityParseFunctions<'m> for MinecraftData<'m> {
                                 .get("argument")
                                 .expect("Missing argument field in minecraft:half_negative");
                             let argument = self.parse_density_function_from_value(argument_value);
-                            let half = self.arena.alloc(DensityType::Const(0.5));
-                            let half_negative = self.arena.alloc(DensityType::Multiply {
-                                left: argument,
-                                right: half,
-                            });
-                            self.arena.alloc(DensityType::RangeChoice {
-                                input: argument,
-                                min_inclusive: -9999999999.0, // effectively negative infinity
-                                max_exclusive: 0.0,
-                                when_in_range: half_negative,
-                                when_out_of_range: argument,
+
+                            self.arena.alloc(DensityType::XNegative {
+                                argument,
+                                neg_x_multiplier: 0.5,
                             })
                         }
 
@@ -433,6 +421,7 @@ impl<'m> DensityParseFunctions<'m> for MinecraftData<'m> {
 
                             self.arena.alloc(DensityType::WeirdScaledSampler {
                                 input,
+                                noise_name: noise_to_sample_str.to_string(),
                                 noise_to_sample: *noise_to_sample,
                                 rarity_value_mapper,
                             })

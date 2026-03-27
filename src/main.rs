@@ -30,7 +30,7 @@ pub fn main() {
     let mut data = config_load::MinecraftDataRaw::new();
     config_load::load_all_configs(&mut data, "vanilla_worldgen_1.21.1", None);
     //config_load::load_all_configs(&mut data, "JJThunderToTheMax", None);
-    config_load::load_all_configs(&mut data, "testmod", None);
+    //config_load::load_all_configs(&mut data, "testmod", None);
     // reexport the config
     // config_load::reexport(&data, "reexport_t");
 
@@ -38,13 +38,22 @@ pub fn main() {
     let mut mcdata = parse::MinecraftData::new(&arena, &data);
     mcdata.parse_from_raw();
     println!(
-        "Parsed Minecraft data: {} density functions",
-        mcdata.density_functions.len()
-    );
-    println!(
         "Final arena usage after parsing: {} MB",
         arena.allocated_bytes() as f64 / (1024.0 * 1024.0)
     );
+
+    // pretty print one of the density functions to a file
+    let density_function = mcdata
+        .noise_settings
+        .get("minecraft:overworld")
+        .unwrap()
+        .noise_router
+        .final_density;
+    let pretty = format!("{}", density_function.get_density());
+    std::fs::write("pretty_density_function.txt", pretty).expect("Unable to write file");
+    let dot = parse::dot::print_density_dot(density_function.get_density());
+
+    std::fs::write("density_function.dot", dot).expect("Unable to write file");
 
     let transform_arena = bumpalo::Bump::with_capacity(1 * 1024 * 1024); // 1 MB initial capacity
     let transformer = transform_spmt::Transformer::new(&transform_arena);
@@ -193,7 +202,7 @@ pub fn main() {
 
     // write the RCL functions to a file in a different folder
     let folder = "../rcl_density";
-    // generate the
+    //let folder = "../Tungsten/libtungsten";
 
     let rust_cg = RustCodeGenerator::new();
     //println!("RCL Model: {:?}", rcl_model);

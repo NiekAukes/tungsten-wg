@@ -71,7 +71,7 @@ impl<'m> OrchestrationConverter<'m> {
                 let (output_var, declare) =
                     builders::make_output_buffer(&shader_name, dep.dimensions);
                 orch_function.add_statement(declare);
-                shader_output_map.insert(dep.shader, output_var.clone());
+                shader_output_map.insert(dep.clone(), output_var.clone());
 
                 let (dep_exprs, dep_types) =
                     builders::collect_dep_args(&dep.shader.inputs, &shader_output_map);
@@ -121,7 +121,7 @@ impl<'m> OrchestrationConverter<'m> {
     }
 
     /// Generate a pruned orchestration function for a single entry density.
-    /// The function is named `orchestrate_{name}` and returns a `Box<[f32; N]>`
+    /// The function is named `orchestrate_{name}` and returns a `Box<[f64; N]>`
     /// containing only the output of the target density and its transitive deps.
     pub fn convert_single_entry(
         &mut self,
@@ -131,7 +131,7 @@ impl<'m> OrchestrationConverter<'m> {
     ) {
         let fn_name = format!("orchestrate_{}", sanitize_name(name));
         let dims = target.dimensions.flatten() as usize;
-        let return_type = Type::Struct(format!("Box<[f32; {}]>", dims));
+        let return_type = Type::Struct(format!("Box<[f64; {}]>", dims));
 
         let mut func = crate::rcl::model::Function {
             name: Some(fn_name),
@@ -168,7 +168,7 @@ impl<'m> OrchestrationConverter<'m> {
                 let (output_var, declare) =
                     builders::make_output_buffer(&shader_name, dep.dimensions);
                 func.add_statement(declare);
-                shader_output_map.insert(dep.shader, output_var.clone());
+                shader_output_map.insert(dep.clone(), output_var.clone());
 
                 let (dep_exprs, dep_types) =
                     builders::collect_dep_args(&dep.shader.inputs, &shader_output_map);
@@ -194,7 +194,7 @@ impl<'m> OrchestrationConverter<'m> {
         }
 
         // Return the target density's output buffer directly
-        let target_output = shader_output_map.get(&target.shader).unwrap();
+        let target_output = shader_output_map.get(target).unwrap();
         func.body.push(Statement::Return(Some(Expression::Variable(
             target_output.clone(),
         ))));

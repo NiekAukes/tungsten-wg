@@ -1,12 +1,18 @@
+use std::hash::Hash;
+use std::hash::Hasher;
+
 pub mod dot;
 pub mod model;
 pub mod transform;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy)]
 pub struct Scale {
     x: u32,
     y: u32,
     z: u32,
+    rx: f64,
+    ry: f64,
+    rz: f64,
 }
 
 impl Scale {
@@ -16,15 +22,14 @@ impl Scale {
             x: (x * 65565.0) as u32,
             y: (y * 65565.0) as u32,
             z: (z * 65565.0) as u32,
+            rx: x as f64,
+            ry: y as f64,
+            rz: z as f64,
         }
     }
 
     pub fn as_float(&self) -> (f32, f32, f32) {
-        (
-            self.x as f32 / 65565.0,
-            self.y as f32 / 65565.0,
-            self.z as f32 / 65565.0,
-        )
+        (self.rx as f32, self.ry as f32, self.rz as f32)
     }
 }
 
@@ -35,10 +40,10 @@ pub trait Flatten {
 }
 
 impl Flatten for (i32, i32, i32) {
-    type Output = i32;
+    type Output = usize;
 
     fn flatten(&self) -> Self::Output {
-        self.0 * self.1 * self.2
+        self.0 as usize * self.1 as usize * self.2 as usize
     }
 }
 
@@ -48,6 +53,9 @@ impl From<(i32, i32, i32)> for Scale {
             x: value.0 as u32,
             y: value.1 as u32,
             z: value.2 as u32,
+            rx: value.0 as f64 / 65565.0,
+            ry: value.1 as f64 / 65565.0,
+            rz: value.2 as f64 / 65565.0,
         }
     }
 }
@@ -64,6 +72,25 @@ impl Default for Scale {
             x: 65565,
             y: 65565,
             z: 65565,
+            rx: 1.0,
+            ry: 1.0,
+            rz: 1.0,
         }
     }
 }
+
+impl Hash for Scale {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.x.hash(state);
+        self.y.hash(state);
+        self.z.hash(state);
+    }
+}
+
+impl PartialEq for Scale {
+    fn eq(&self, other: &Self) -> bool {
+        self.x == other.x && self.y == other.y && self.z == other.z
+    }
+}
+
+impl Eq for Scale {}

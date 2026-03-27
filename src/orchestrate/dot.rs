@@ -187,17 +187,21 @@ impl<'m> Orchestration<'m> {
             for dep in wave {
                 let id = dep.get_id();
                 let dimensions = dep.dimensions;
-                let scale = dep.scaled_origin.as_float();
+                let o_scale = dep.scaled_origin.as_float();
+                let p_scale = dep.scaled_position.as_float();
                 p.line(&format!(
-                    r#"{id} [label="{label}\nDimensions: ({x} {y} {z})\nScale: ({sx} {sy} {sz})"];"#,
+                    r#"{id} [label="{label}\nDimensions: ({x} {y} {z})\nO-Scale: ({sx} {sy} {sz}) \nP-Scale: ({px} {py} {pz})"];"#,
                     id = id,
                     label = dep.shader.name,
                     x = dimensions.0,
                     y = dimensions.1,
                     z = dimensions.2,
-                    sx = scale.0,
-                    sy = scale.1,
-                    sz = scale.2,
+                    sx = o_scale.0,
+                    sy = o_scale.1,
+                    sz = o_scale.2,
+                    px = p_scale.0,
+                    py = p_scale.1,
+                    pz = p_scale.2,
                 ));
             }
 

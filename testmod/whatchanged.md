@@ -1,0 +1,2 @@
+- removed all cache_once and cache_2d, they are simply irreproducable due to how minecraft handles them
+- base_3d_noise was changed to a simple noise density function, as the old_blended_noise is a bit hard to decode for now.

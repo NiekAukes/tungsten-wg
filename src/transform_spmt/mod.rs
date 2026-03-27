@@ -1,7 +1,7 @@
 use crate::{
-    parse::model::{Density, DensitySource, DensityType, NoiseGeneratorSettings},
+    parse::model::{Density, DensitySource, DensityType, NoiseGeneratorSettings, NoiseSettings},
     spmt::model::{DensityFunctionRef, Expression, SPMT, Var, Variable, VariableType},
-    transform_spmt::density::{DensityBuilder, NormalNoiseScaled},
+    transform_spmt::density::{DensityBuilder, NormalNoiseKey},
 };
 
 pub mod density;
@@ -24,7 +24,7 @@ pub fn anonvar<'m>(arena: &'m bumpalo::Bump, t: VariableType) -> Var<'m> {
 }
 
 type DensityFunctionCache<'a, 'm> = std::collections::HashMap<Density<'a>, DensityFunctionRef<'m>>;
-type NoiseCache<'a, 'm> = std::collections::HashMap<NormalNoiseScaled<'a>, DensityFunctionRef<'m>>;
+type NoiseCache<'a, 'm> = std::collections::HashMap<NormalNoiseKey<'a>, DensityFunctionRef<'m>>;
 
 pub struct BuilderState<'a, 'm> {
     pub density_function_cache: DensityFunctionCache<'a, 'm>,
@@ -33,6 +33,9 @@ pub struct BuilderState<'a, 'm> {
     working_dimensions: (i32, i32, i32),
     working_scaled_position: (f32, f32, f32),
     working_scaled_origin: (f32, f32, f32),
+
+    pub noise_settings: NoiseSettings,
+    density_counter: usize,
 }
 
 pub struct Transformer<'a, 'm> {
@@ -58,6 +61,13 @@ impl<'a, 'm> Transformer<'a, 'm> {
                 working_dimensions: (0, 0, 0),
                 working_scaled_position: (1.0, 1.0, 1.0),
                 working_scaled_origin: (1.0, 1.0, 1.0),
+                noise_settings: NoiseSettings {
+                    min_y: 0,
+                    height: 256,
+                    size_horizontal: 4,
+                    size_vertical: 4,
+                },
+                density_counter: 0,
             }),
         }
     }
@@ -72,6 +82,9 @@ impl<'a, 'm> Transformer<'a, 'm> {
                     {
                         let bs = self.builder_state.as_mut().unwrap();
                         bs.working_dimensions = (1, 1, 1);
+                        bs.working_scaled_origin = (1.0, 1.0, 1.0);
+                        bs.working_scaled_position = (1.0, 1.0, 1.0);
+                        bs.noise_settings = noise_generator.noise.clone();
                     }
 
                     // TODO: add single-sampling support in the density builder.
@@ -83,6 +96,9 @@ impl<'a, 'm> Transformer<'a, 'm> {
                     {
                         let bs = self.builder_state.as_mut().unwrap();
                         bs.working_dimensions = dimensions;
+                        bs.working_scaled_origin = (1.0, 1.0, 1.0);
+                        bs.working_scaled_position = (1.0, 1.0, 1.0);
+                        bs.noise_settings = noise_generator.noise.clone();
                     }
 
                     let density_function = self.lower_density_function(density);
@@ -162,5 +178,13 @@ impl<'a, 'm> Transformer<'a, 'm> {
             .insert(density, density_function.clone());
         self.builder_state = Some(bs);
         density_function
+    }
+}
+
+impl<'a, 'm> BuilderState<'a, 'm> {
+    pub fn use_density_counter(&mut self) -> usize {
+        let current = self.density_counter;
+        self.density_counter += 1;
+        current
     }
 }

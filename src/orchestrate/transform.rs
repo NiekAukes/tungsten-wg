@@ -23,6 +23,7 @@ pub fn transform_from_spmt<'a, 'm>(spmt: &SPMT<'a>, arena: &'m bumpalo::Bump) ->
         let shader_dependency = ShaderDependency {
             shader: shader_ref,
             scaled_origin: Scale::new(1.0, 1.0, 1.0),
+            scaled_position: Scale::new(1.0, 1.0, 1.0),
             dimensions: *dims,
         };
         transformer
@@ -70,6 +71,11 @@ impl<'m, 'a> Transformer<'a, 'm> {
                     input.scaled_origin.0,
                     input.scaled_origin.1,
                     input.scaled_origin.2,
+                ),
+                scaled_position: Scale::new(
+                    input.scaled_position.0,
+                    input.scaled_position.1,
+                    input.scaled_position.2,
                 ),
                 dimensions: input.dimensions,
             });

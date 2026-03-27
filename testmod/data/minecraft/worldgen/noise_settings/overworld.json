@@ -22,7 +22,7 @@
     "continents": 0,
     "depth": 0,
     "erosion": 0,
-    "final_density": "minecraft:noodle_test",
+    "final_density": "minecraft:overworld/ridges_folded",
     "fluid_level_floodedness": 0,
     "fluid_level_spread": 0,
     "initial_density_without_jaggedness": 0,

@@ -9,7 +9,7 @@ use std::rc::Rc;
 use super::{RCLFunctionConverter, sanitize_name, types};
 use crate::rcl::{Parameter, model as rcl};
 use crate::spmt::model::{self as spmt, Addr, Interned};
-use crate::transform_rcl::types::permutation_table_var_name;
+use crate::transform_rcl::types::{convert_type, permutation_table_var_name};
 use crate::transform_rcl::{InputKey, function};
 
 /// Convert an SPMT expression to an RCL expression
@@ -103,7 +103,7 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
                 rcl::Expression::LateBoundCall {
                     function_name: function_name.clone(),
                     argument_types: argument_types,
-                    return_type: rcl::Type::F32,
+                    return_type: convert_type(&spmt::VariableType::F32),
                     arguments,
                 }
             }
@@ -130,7 +130,7 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
                     .cloned()
                     .unwrap_or(Parameter {
                         name: format!("err_{}", input.density_function.addr() as usize),
-                        t: rcl::Type::ArrayRef(Box::new(rcl::Type::F32), 16 * 16 * 256),
+                        t: rcl::Type::Void,
                     });
                 rcl::Expression::Index {
                     base: Box::new(rcl::Expression::Variable(Rc::new(rcl::Variable {
@@ -204,11 +204,11 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
             (spmt::VariableType::I32, spmt::Expression::Int(_)) => exp,
             (spmt::VariableType::F32, _) => rcl::Expression::Cast {
                 expr: Box::new(exp),
-                to_type: rcl::Type::F32,
+                to_type: convert_type(&spmt::VariableType::F32),
             },
             (spmt::VariableType::I32, _) => rcl::Expression::Cast {
                 expr: Box::new(exp),
-                to_type: rcl::Type::I32,
+                to_type: convert_type(&spmt::VariableType::I32),
             },
             (_, _) => exp, // do nothing
         };

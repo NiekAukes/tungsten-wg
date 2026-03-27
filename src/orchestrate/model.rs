@@ -13,6 +13,7 @@ pub type ShaderRef<'a> = Ref<'a, Shader<'a>>;
 pub struct ShaderDependency<'a> {
     pub shader: ShaderRef<'a>,
     pub scaled_origin: Scale,
+    pub scaled_position: Scale,
     pub dimensions: (i32, i32, i32),
 }
 
@@ -63,6 +64,7 @@ impl<'a> Orchestration<'a> {
         self.main_shaders.push(ShaderDependency {
             shader: shader_ref,
             scaled_origin: Scale::new(1.0, 1.0, 1.0),
+            scaled_position: Scale::new(1.0, 1.0, 1.0),
             dimensions,
         });
         shader_ref

@@ -33,7 +33,7 @@ pub struct NoiseGeneratorSettings<'m> {
     pub noise_router: NoiseRouter<'m>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub struct NoiseSettings {
     pub height: i32,
     pub min_y: i32,
@@ -158,6 +158,12 @@ pub enum DensityType<'m> {
         when_out_of_range: Density<'m>,
     },
 
+    // if the argument is negative, multiply it by neg_x_multiplier, else return it as is.
+    XNegative {
+        argument: Density<'m>,
+        neg_x_multiplier: f64,
+    },
+
     Clamp {
         input: Density<'m>,
         min: f64,
@@ -166,6 +172,7 @@ pub enum DensityType<'m> {
 
     WeirdScaledSampler {
         input: Density<'m>,
+        noise_name: String,
         noise_to_sample: NormalNoise<'m>,
         rarity_value_mapper: String,
     },
@@ -336,11 +343,13 @@ impl Hash for DensityType<'_> {
 
             DensityType::WeirdScaledSampler {
                 input,
+                noise_name,
                 noise_to_sample,
                 rarity_value_mapper,
             } => {
                 22.hash(state);
                 input.hash(state);
+                noise_name.hash(state);
                 noise_to_sample.hash(state);
                 rarity_value_mapper.hash(state);
             }
@@ -358,6 +367,14 @@ impl Hash for DensityType<'_> {
                 25.hash(state);
                 name.hash(state);
                 argument.hash(state);
+            }
+            DensityType::XNegative {
+                argument,
+                neg_x_multiplier,
+            } => {
+                26.hash(state);
+                argument.hash(state);
+                neg_x_multiplier.to_bits().hash(state);
             }
         }
     }

@@ -26,7 +26,7 @@ pub fn convert_function<'a, 'm>(
     converter.already_converted_functions = already_converted_functions;
     let mut rcl_func = rcl::Function::new(
         spmt_func.canonical_name.as_deref().map(sanitize_name),
-        rcl::Type::F32,
+        convert_type(&spmt::VariableType::DensityInput),
     );
 
     // Convert parameters
@@ -81,7 +81,7 @@ pub fn convert_density_function<'a, 'm>(
     let mut rcl_funcs = Vec::new();
     let mut rcl_func = rcl::Function::new(
         spmt_df.canonical_name.as_deref().map(sanitize_name),
-        rcl::Type::F32,
+        convert_type(&spmt::VariableType::DensityInput),
     );
 
     // Add position parameters (x, y, z)
@@ -99,16 +99,22 @@ pub fn convert_density_function<'a, 'm>(
                 .unwrap_or_else(|| format!("input_{}", input.density_function.addr() as usize)),
         );
 
-        let dimensions = input.dimensions.0 * input.dimensions.1 * input.dimensions.2;
+        let dimensions = input.dimensions.flatten();
         rcl_func.add_parameter(
             param_name.clone(),
-            rcl::Type::ArrayRef(Box::new(Type::F32), dimensions as usize),
+            rcl::Type::ArrayRef(
+                Box::new(convert_type(&spmt::VariableType::DensityInput)),
+                dimensions as usize,
+            ),
         );
         density_inputs.insert(
             InputKey::from(input),
             Parameter {
                 name: param_name,
-                t: rcl::Type::ArrayRef(Box::new(Type::F32), input.dimensions.flatten() as usize),
+                t: rcl::Type::ArrayRef(
+                    Box::new(convert_type(&spmt::VariableType::DensityInput)),
+                    input.dimensions.flatten() as usize,
+                ),
             },
         );
     }

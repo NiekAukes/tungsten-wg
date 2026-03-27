@@ -30,8 +30,8 @@ impl RustCodeGenerator {
 
         p.line("");
 
-        p.line("use crate::math::*;");
-        p.line("use crate::utils::*;");
+        p.line("use crate::mathf64::*;");
+        p.line("use crate::utilsf64::*;");
 
         for import in &icl.import_statements {
             p.push("use ");
@@ -338,7 +338,7 @@ impl RustCodeGenerator {
             icl::Expression::Variable(var) => self.variable_to_string(var, p),
             icl::Expression::I32Literal(val) => format!("{}_i32", val),
             icl::Expression::I64Literal(val) => format!("{}_i64", val),
-            icl::Expression::FloatLiteral(val) => format!("{}_f32", val),
+            icl::Expression::FloatLiteral(val) => format!("{}_f64", val),
             icl::Expression::BoolLiteral(val) => format!("{}", val),
             icl::Expression::BinaryOp { op, left, right } => {
                 format!(

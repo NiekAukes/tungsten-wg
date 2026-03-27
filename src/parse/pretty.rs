@@ -39,7 +39,7 @@ impl<'m> DensityType<'m> {
             | DensityType::Abs { argument }
             | DensityType::Square { argument }
             | DensityType::Cube { argument } => {
-                writeln!(f, "{}{:?}:", pad(indent), self.variant_name())?;
+                writeln!(f, "{}{}:", pad(indent), self.variant_name())?;
                 argument.fmt_with_indent(f, indent + 2)
             }
 
@@ -89,17 +89,20 @@ impl<'m> DensityType<'m> {
                 y_scale,
                 ..
             } => {
-                writeln!(
-                    f,
-                    "{}ShiftedNoise(shift_y={}, xz_scale={}, y_scale={}, ...)",
-                    pad(indent),
-                    shift_y,
-                    xz_scale,
-                    y_scale
-                )
+                // writeln!(
+                //     f,
+                //     "{}ShiftedNoise(shift_y={}, xz_scale={}, y_scale={}, ...)",
+                //     pad(indent),
+                //     shift_y,
+                //     xz_scale,
+                //     y_scale
+                // )
+                writeln!(f, "{}ShiftedNoise(...)", pad(indent))
             }
             DensityType::Spline { spline } => {
-                writeln!(f, "{}Spline({})", pad(indent), spline)
+                writeln!(f, "{}Spline(", pad(indent),)?;
+                spline.fmt_with_indent(f, indent + 2)?;
+                writeln!(f, "{})", pad(indent))
             }
             DensityType::Min { left, right } | DensityType::Max { left, right } => {
                 writeln!(f, "{}{:?}:", pad(indent), self.variant_name())?;
@@ -126,6 +129,18 @@ impl<'m> DensityType<'m> {
                 when_in_range.fmt_with_indent(f, indent + 4)?;
                 writeln!(f, "{}WhenOutOfRange:", pad(indent + 2))?;
                 when_out_of_range.fmt_with_indent(f, indent + 4)
+            }
+            DensityType::XNegative {
+                argument,
+                neg_x_multiplier,
+            } => {
+                writeln!(
+                    f,
+                    "{}XNegative(neg_x_multiplier={}):",
+                    pad(indent),
+                    neg_x_multiplier
+                )?;
+                argument.fmt_with_indent(f, indent + 2)
             }
             DensityType::Clamp { input, min, max } => {
                 writeln!(f, "{}Clamp(min={}, max={}):", pad(indent), min, max)?;

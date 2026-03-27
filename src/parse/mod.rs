@@ -20,6 +20,7 @@ use crate::{
 };
 
 pub mod density;
+pub mod dot;
 pub mod model;
 pub mod pretty;
 pub mod spline;
@@ -170,6 +171,8 @@ impl<'m> Debug for MinecraftData<'m> {
             .finish()
     }
 }
+
+const SZ_XZ: i32 = 16;
 
 impl<'m> MinecraftData<'m> {
     pub fn new(arena: &'m Bump, raw: &'m MinecraftDataRaw) -> MinecraftData<'m> {
@@ -366,7 +369,7 @@ impl<'m> MinecraftData<'m> {
             erosion: DensitySource::SingleSamplingDensity { density: erosion },
             final_density: DensitySource::MultiSamplingDensity {
                 density: final_density,
-                dimensions: (16, settings.height, 16),
+                dimensions: (SZ_XZ, settings.height, SZ_XZ),
             },
             fluid_level_floodedness: DensitySource::SingleSamplingDensity {
                 density: fluid_level_floodedness,

@@ -13,13 +13,13 @@ pub const OUTPUT_STRUCT_NAME: &str = "OrchestrationOutput";
 /// initialiser list for the final `return` expression.
 pub fn build_return_struct<'m>(
     returns: &[ShaderDependency<'m>],
-    shader_output_map: &HashMap<ShaderRef<'m>, Rc<Variable>>,
+    shader_output_map: &HashMap<ShaderDependency<'m>, Rc<Variable>>,
 ) -> (Struct, Vec<(String, Expression<'m>)>) {
     let mut output_struct = Struct::new(OUTPUT_STRUCT_NAME.to_string());
     let mut struct_fields = Vec::new();
 
     for dep in returns {
-        let output_var = shader_output_map.get(&dep.shader).unwrap();
+        let output_var = shader_output_map.get(dep).unwrap();
         let field_name = sanitize_name(&dep.shader.name);
         output_struct.add_field(field_name.clone(), output_var.t.clone());
         struct_fields.push((field_name, Expression::Variable(output_var.clone())));

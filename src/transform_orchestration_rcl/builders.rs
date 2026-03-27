@@ -92,13 +92,13 @@ pub fn perm_table_var_name(perm_table: &PermutationTableInput) -> String {
     ))
 }
 
-/// Creates a `Box<[f32; N]>` initialiser expression via `make_buffer::<N>()`.
+/// Creates a `Box<[f64; N]>` initialiser expression via `make_buffer::<N>()`.
 pub fn box_array<'m>(count: usize) -> Expression<'m> {
     Expression::LateBoundCall {
         function_name: format!("make_buffer::<{}>", count),
         arguments: vec![],
         argument_types: vec![],
-        return_type: Type::Struct(format!("Box<[f32; {}]>", count)),
+        return_type: Type::Struct(format!("Box<[f64; {}]>", count)),
     }
 }
 
@@ -110,8 +110,8 @@ pub fn make_output_buffer<'m>(
 ) -> (Rc<Variable>, Statement<'m>) {
     let dims = dimensions.flatten() as usize;
     let output_var = Rc::new(Variable {
-        name: Some(format!("{}_output", shader_name)),
-        t: Type::Struct(format!("Box<[f32; {}]>", dims)),
+        name: Some(format!("{}_{}_output", shader_name, dims)),
+        t: Type::Struct(format!("Box<[f64; {}]>", dims)),
         mutable: true,
     });
 
@@ -127,17 +127,17 @@ pub fn make_output_buffer<'m>(
 /// shader dependencies that feed into the current shader.
 pub fn collect_dep_args<'m>(
     shader_inputs: &[ShaderDependency<'m>],
-    shader_output_map: &HashMap<ShaderRef<'m>, Rc<Variable>>,
+    shader_output_map: &HashMap<ShaderDependency<'m>, Rc<Variable>>,
 ) -> (Vec<Expression<'m>>, Vec<Type>) {
     let mut dep_exprs = Vec::new();
     let mut dep_types = Vec::new();
     for dep in shader_inputs {
-        let dep_output_var = shader_output_map.get(&dep.shader).unwrap();
+        let dep_output_var = shader_output_map.get(&dep).unwrap();
         dep_exprs.push(Expression::Ref(Box::new(Expression::Variable(
             dep_output_var.clone(),
         ))));
         let dep_dims = dep.dimensions.flatten() as usize;
-        dep_types.push(Type::Array(Box::new(Type::F32), dep_dims));
+        dep_types.push(Type::Array(Box::new(Type::F64), dep_dims));
     }
     (dep_exprs, dep_types)
 }
@@ -226,7 +226,7 @@ pub fn make_shader_loop<'m>(
             function_name: shader_name,
             arguments: call_args,
             argument_types: call_arg_types,
-            return_type: Type::Array(Box::new(Type::F32), dims),
+            return_type: Type::Array(Box::new(Type::F64), dims),
         },
     };
 

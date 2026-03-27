@@ -1,12 +1,7 @@
-use std::{
-    cell::Cell,
-    collections::HashSet,
-    fmt::{Write, format},
-    rc::Rc,
-};
+use std::fmt::Write;
 
 use crate::spmt::model::{
-    Addr, DensityFunction, Expression, Function, Interned, SPMT, Statement, Variable,
+    Addr, BinaryOperator, DensityFunction, Expression, Function, SPMT, Statement, UnaryOperator,
 };
 
 const INDENT: &str = "    ";
@@ -122,7 +117,10 @@ impl<'m> PrettyPrint for Function<'m> {
             if i > 0 {
                 p.push(", ");
             }
-            let param_name = param.name.clone().unwrap_or(p.anon_name(param, "param"));
+            let param_name = param
+                .name
+                .clone()
+                .unwrap_or_else(|| p.anon_name(*param, "param"));
             write!(p.line, "{}: {:?}", param_name, param.t).unwrap();
         }
 
@@ -158,6 +156,22 @@ impl<'m> PrettyPrint for DensityFunction<'m> {
                 let n = p.anon_name(d.density_function, "density-function");
                 p.line(&format!("// - {}", n));
             }
+        }
+
+        if !self.permutation_table_inputs.is_empty() {
+            p.line("// permutation table inputs:");
+            for pt in &self.permutation_table_inputs {
+                match &pt.subident {
+                    Some(sub) => p.line(&format!(
+                        "// - {}_{} [{}]",
+                        pt.ident, sub, pt.subident_index
+                    )),
+                    None => p.line(&format!("// - {}", pt.ident)),
+                }
+            }
+        }
+
+        if !self.density_inputs.is_empty() || !self.permutation_table_inputs.is_empty() {
             p.line("");
         }
 
@@ -177,7 +191,10 @@ impl<'m> PrettyPrint for Statement<'m> {
     fn pretty(&self, p: &mut Printer) {
         match self {
             Statement::Assign { target, value } => {
-                let target_name = target.name.clone().unwrap_or(p.anon_name(target, "var"));
+                let target_name = target
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| p.anon_name(*target, "var"));
                 p.push(&target_name);
                 p.push(" = ");
                 value.pretty(p);
@@ -248,7 +265,10 @@ impl<'m> PrettyPrint for Expression<'m> {
                 p.push(&name);
             }
             Expression::Float(v) => {
-                write!(p.line, "{:.6}", v).unwrap();
+                //write!(p.line, "{}", v).unwrap();
+                let s = format!("{:.4}", v);
+                let s = s.trim_end_matches('0').trim_end_matches('.').to_string();
+                p.push(&s);
             }
             Expression::Int(v) => {
                 write!(p.line, "{}", v).unwrap();
@@ -260,11 +280,6 @@ impl<'m> PrettyPrint for Expression<'m> {
                 function,
                 parameters,
             } => {
-                // let name = function
-                //     .canonical_name
-                //     .as_deref()
-                //     .unwrap_or_else(|| p.anon_name(function, "func"))
-                //     .to_string();
                 if let Some(name) = function.canonical_name.as_deref() {
                     p.push(name);
                 } else {
@@ -302,30 +317,18 @@ impl<'m> PrettyPrint for Expression<'m> {
                 p.push("(");
                 left.pretty(p);
                 p.push(match op {
-                    crate::spmt::model::BinaryOperator::Add => " + ",
-                    crate::spmt::model::BinaryOperator::Subtract => " - ",
-                    crate::spmt::model::BinaryOperator::Multiply => " * ",
-                    crate::spmt::model::BinaryOperator::Divide => " / ",
-                    // super::model::BinaryOperator::Add => todo!(),
-                    // super::model::BinaryOperator::Subtract => todo!(),
-                    // super::model::BinaryOperator::Multiply => todo!(),
-                    // super::model::BinaryOperator::Divide => todo!(),
-                    // super::model::BinaryOperator::Equal => todo!(),
-                    // super::model::BinaryOperator::NotEqual => todo!(),
-                    // super::model::BinaryOperator::Less => todo!(),
-                    // super::model::BinaryOperator::LessEqual => todo!(),
-                    // super::model::BinaryOperator::Greater => todo!(),
-                    // super::model::BinaryOperator::GreaterEqual => todo!(),
-                    // super::model::BinaryOperator::And => todo!(),
-                    // super::model::BinaryOperator::Or => todo!(),
-                    crate::spmt::model::BinaryOperator::Equal => " == ",
-                    crate::spmt::model::BinaryOperator::NotEqual => " != ",
-                    crate::spmt::model::BinaryOperator::Less => " < ",
-                    crate::spmt::model::BinaryOperator::LessEqual => " <= ",
-                    crate::spmt::model::BinaryOperator::Greater => " > ",
-                    crate::spmt::model::BinaryOperator::GreaterEqual => " >= ",
-                    crate::spmt::model::BinaryOperator::And => " && ",
-                    crate::spmt::model::BinaryOperator::Or => " || ",
+                    BinaryOperator::Add => " + ",
+                    BinaryOperator::Subtract => " - ",
+                    BinaryOperator::Multiply => " * ",
+                    BinaryOperator::Divide => " / ",
+                    BinaryOperator::Equal => " == ",
+                    BinaryOperator::NotEqual => " != ",
+                    BinaryOperator::Less => " < ",
+                    BinaryOperator::LessEqual => " <= ",
+                    BinaryOperator::Greater => " > ",
+                    BinaryOperator::GreaterEqual => " >= ",
+                    BinaryOperator::And => " && ",
+                    BinaryOperator::Or => " || ",
                 });
                 right.pretty(p);
                 p.push(")");
@@ -340,19 +343,18 @@ impl<'m> PrettyPrint for Expression<'m> {
                 }
             }
             Expression::PermutationTable(perm_table_input) => {
-                let name = format!(
-                    "perm-table-{}-{}",
-                    perm_table_input.ident,
-                    perm_table_input
-                        .subident
-                        .as_ref()
-                        .unwrap_or(&"".to_string())
-                );
+                let name = match &perm_table_input.subident {
+                    Some(sub) => format!(
+                        "perm-table-{}_{}[{}]",
+                        perm_table_input.ident, sub, perm_table_input.subident_index
+                    ),
+                    None => format!("perm-table-{}", perm_table_input.ident),
+                };
                 p.push(&name);
             }
             Expression::UnaryOp { op, operand } => {
                 p.push(match op {
-                    crate::spmt::model::UnaryOperator::Negate => "-",
+                    UnaryOperator::Negate => "-",
                 });
                 operand.pretty(p);
             }
@@ -361,15 +363,6 @@ impl<'m> PrettyPrint for Expression<'m> {
                 p.push(".");
                 p.push(field);
             }
-            // Expression::MakeVec3 { x, y, z } => {
-            //     p.push("vec3(");
-            //     x.pretty(p);
-            //     p.push(", ");
-            //     y.pretty(p);
-            //     p.push(", ");
-            //     z.pretty(p);
-            //     p.push(")");
-            // }
             Expression::Construct { t, args } => {
                 p.push(&format!("{:?}(", t));
                 for (i, arg) in args.iter().enumerate() {

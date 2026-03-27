@@ -49,6 +49,7 @@ pub struct DensityInput<'m> {
     pub var: Var<'m>,
     pub density_function: DensityFunctionRef<'m>,
     pub scaled_origin: (f32, f32, f32),
+    pub scaled_position: (f32, f32, f32),
     pub dimensions: (i32, i32, i32),
 }
 

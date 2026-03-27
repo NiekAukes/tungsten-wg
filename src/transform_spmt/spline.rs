@@ -33,7 +33,9 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
 
         let old_function = self.switch_function(function);
 
-        let coord_expr = self.lower_density(spline.coordinate);
+        let coord_input = self.lower_density_input(spline.coordinate, None);
+
+        let coord_expr = Expression::DensityVariable(coord_input, None);
 
         self.add_statement(Statement::Assign {
             target: coordinate.clone(),
@@ -49,12 +51,41 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         // -----------------------------------------
         // Build interpolation chain
         // -----------------------------------------
+
         let r = self.build_spline_chain(&points, p, coordinate);
         let function: FunctionRef<'m> = self.finish_and_continue(r, old_function);
         function
     }
 
     fn build_spline_chain(
+        &mut self,
+        points: &[SplinePoint<'a>],
+        p: Var<'m>,
+        input: Var<'m>,
+    ) -> Expression<'m> {
+        // build the initial extrapolation
+        // when input < first.location, extrapolate using the first point's derivative
+        let first = &points[0];
+        let initial_extrapolation = self.make_extrapolation(first, p.clone(), input.clone());
+
+        // wrap it in an if statement that checks if input < first.location
+        let cond = Expression::BinaryOp {
+            op: BinaryOperator::Less,
+            left: Box::new(Expression::Variable(input.clone())),
+            right: Box::new(Expression::Float(first.location)),
+        };
+        let mut then_branch = Vec::new();
+        then_branch.push(Statement::Return(initial_extrapolation));
+        self.add_statement(Statement::If {
+            condition: cond,
+            then_branch,
+            else_branch: Vec::new(),
+        });
+
+        self.continue_spline_chain(points, p, input)
+    }
+
+    fn continue_spline_chain(
         &mut self,
         points: &[SplinePoint<'a>],
         p: Var<'m>,
@@ -84,7 +115,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
             else_branch: Vec::new(),
         });
 
-        return self.build_spline_chain(&points[1..], p, input);
+        return self.continue_spline_chain(&points[1..], p, input);
     }
 
     fn lower_spline_value_expr(&mut self, value: &SplineValue<'a>, p: Var<'m>) -> Expression<'m> {
