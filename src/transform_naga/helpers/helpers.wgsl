@@ -43,35 +43,48 @@ fn perlin_lerp_(delta: f32, a: f32, b: f32) -> f32 {
     return a + delta * (b - a);
 }
 
+struct PerlinNoiseGenerator {
+    perm: array<i32, 256>,
+    origin_x: f32,
+    origin_y: f32,
+    origin_z: f32,
+}
+
 // Perlin noise. Matches Minecraft's ImprovedNoise / sample_perlin_section with fade_y == yf.
 // Signature matches what the SPMT code generator emits:
 //   fn perlin(pos: vec3<f32>, perm: array<i32, 256>) -> f32
-fn perlin(pos: vec3<f32>, perm: array<i32, 256>) -> f32 {
-    let xi = i32(floor(pos.x));
-    let yi = i32(floor(pos.y));
-    let zi = i32(floor(pos.z));
+fn perlin(pos: vec3<f32>, generator: PerlinNoiseGenerator) -> f32 {
+    let rpos3 = vec3<f32>(
+        pos.x + generator.origin_x,
+        pos.y + generator.origin_y,
+        pos.z + generator.origin_z,
+    );
 
-    let xf = pos.x - f32(xi);
-    let yf = pos.y - f32(yi);
-    let zf = pos.z - f32(zi);
+    let xi = i32(floor(rpos3.x));
+    let yi = i32(floor(rpos3.y));
+    let zi = i32(floor(rpos3.z));
+
+    let xf = rpos3.x - f32(xi);
+    let yf = rpos3.y - f32(yi);
+    let zf = rpos3.z - f32(zi);
 
     // Hash the lattice cube corner indices through the permutation table.
-    let mi = perlin_perm_(perm, xi);
-    let mj = perlin_perm_(perm, xi + 1);
-    let k  = perlin_perm_(perm, mi + yi);
-    let l  = perlin_perm_(perm, mi + yi + 1);
-    let m  = perlin_perm_(perm, mj + yi);
-    let n  = perlin_perm_(perm, mj + yi + 1);
+    let mi = perlin_perm_(generator.perm, xi);
+    let mj = perlin_perm_(generator.perm, xi + 1);
+    let k  = perlin_perm_(generator.perm, mi + yi);
+    let l  = perlin_perm_(generator.perm, mi + yi + 1);
+    let m  = perlin_perm_(generator.perm, mj + yi);
+    let n  = perlin_perm_(generator.perm, mj + yi + 1);
 
     // Gradient dot products at the 8 corners of the unit cube.
-    let d = perlin_grad_(perlin_perm_(perm, k + zi),       xf,        yf,        zf);
-    let e = perlin_grad_(perlin_perm_(perm, m + zi),       xf - 1.0,  yf,        zf);
-    let f = perlin_grad_(perlin_perm_(perm, l + zi),       xf,        yf - 1.0,  zf);
-    let g = perlin_grad_(perlin_perm_(perm, n + zi),       xf - 1.0,  yf - 1.0,  zf);
-    let h = perlin_grad_(perlin_perm_(perm, k + zi + 1),   xf,        yf,        zf - 1.0);
-    let o = perlin_grad_(perlin_perm_(perm, m + zi + 1),   xf - 1.0,  yf,        zf - 1.0);
-    let p = perlin_grad_(perlin_perm_(perm, l + zi + 1),   xf,        yf - 1.0,  zf - 1.0);
-    let q = perlin_grad_(perlin_perm_(perm, n + zi + 1),   xf - 1.0,  yf - 1.0,  zf - 1.0);
+    let d = perlin_grad_(perlin_perm_(generator.perm, k + zi),       xf,        yf,        zf);
+    let e = perlin_grad_(perlin_perm_(generator.perm, m + zi),       xf - 1.0,  yf,        zf);
+    let f = perlin_grad_(perlin_perm_(generator.perm, l + zi),       xf,        yf - 1.0,  zf);
+    let g = perlin_grad_(perlin_perm_(generator.perm, n + zi),       xf - 1.0,  yf - 1.0,  zf);
+    let h = perlin_grad_(perlin_perm_(generator.perm, k + zi + 1),   xf,        yf,        zf - 1.0);
+    let o = perlin_grad_(perlin_perm_(generator.perm, m + zi + 1),   xf - 1.0,  yf,        zf - 1.0);
+    let p = perlin_grad_(perlin_perm_(generator.perm, l + zi + 1),   xf,        yf - 1.0,  zf - 1.0);
+    let q = perlin_grad_(perlin_perm_(generator.perm, n + zi + 1),   xf - 1.0,  yf - 1.0,  zf - 1.0);
 
     let rx = perlin_fade_(xf);
     let ry = perlin_fade_(yf); // fade_y == yf (sample_perlin passes h twice)
@@ -163,7 +176,7 @@ fn zfract4_(pos_z: u32) -> f32 { return f32(pos_z & 3u) * 0.25; }
 
 // Fractional position within a 4×16×4 grid cell.
 // Matches yfract16 in mathf64.rs.
-fn yfract16_(pos_y: u32) -> f32 { return f32(pos_y & 15u) * 0.0625; }
+fn yfract16(pos_y: u32) -> f32 { return f32(pos_y & 15u) * 0.0625; }
 
 // Trilinear interpolation over a 4×8×4 density grid.
 // The caller is responsible for fetching the 8 surrounding corner values
@@ -303,20 +316,20 @@ fn zfract4(pos: vec3<u32>) -> f32 { return zfract4_(pos.z); }
 
 // 3-D → 2-D index with y dimension flattened (y is ignored).
 // stride order: z * size_x + x
-fn flat_y_zero_index(pos: vec3<u32>, size_x: u32) -> u32 {
+fn flat_y_zero_index(pos: vec3<u32>, size_x: u32, size_y: u32) -> u32 {
     return pos.z * size_x + pos.x;
 }
 
 // 3-D → 2-D index with z dimension flattened (z is ignored).
 // stride order: y * size_x + x
-fn flat_z_zero_index(pos: vec3<u32>, size_x: u32) -> u32 {
+fn flat_z_zero_index(pos: vec3<u32>, size_x: u32, size_y: u32) -> u32 {
     return pos.y * size_x + pos.x;
 }
 
 // Biome column index: shifts x and z right by 2, clears y, then flat_y_zero_index with size_x=4.
 // Matches biome_column_index() in mathf64.rs.
 fn biome_column_index(pos: vec3<u32>) -> u32 {
-    return flat_y_zero_index(vec3<u32>(pos.x >> 2u, 0u, pos.z >> 2u), 4u);
+    return flat_y_zero_index(vec3<u32>(pos.x >> 2u, 0u, pos.z >> 2u), 4u, 0u);
 }
 
 

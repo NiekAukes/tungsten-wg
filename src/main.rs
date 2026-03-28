@@ -9,6 +9,7 @@ use crate::{
         model::{Addr, DensityFunctionRef},
         pretty::PrettyPrint,
     },
+    transform_orchestration_gpu::GpuOrchestrationCodegen,
     transform_orchestration_rcl::OrchestrationConverter,
 };
 
@@ -215,6 +216,20 @@ pub fn main() {
     std::fs::write(format!("{}/src/orchestration.rs", folder), orch_output)
         .expect("Unable to write file");
 
+    // Generate GPU orchestrator code for each primary density
+    let mut gpu_codegen = GpuOrchestrationCodegen::new();
+    for primary in &orchestration.get_primary_shaders() {
+        let name = &primary.shader.name;
+        let pruned_waves = orchestration.arrange_waves_for(primary);
+        gpu_codegen.convert_single_entry(name, &pruned_waves, primary);
+    }
+    let gpu_orch_output = gpu_codegen.finish();
+    std::fs::write(
+        format!("{}/src/gpu_orchestrator.rs", folder),
+        gpu_orch_output,
+    )
+    .expect("Unable to write GPU orchestrator file");
+
     // transform to Naga IR and write WGSL shaders (one per density function)
     let helpers = transform_naga::parse_helpers();
     let naga_modules =
@@ -252,7 +267,7 @@ pub fn main() {
                         println!(
                             "Generated WGSL shader '{}' with {} functions ({} bytes)",
                             file_path,
-                            naga_module.functions.len(),
+                            naga_module.functions.len() + 1, // +1 for the entry point function
                             wgsl.len()
                         );
                     }

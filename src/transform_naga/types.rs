@@ -3,11 +3,11 @@ Type conversion utilities for translating SPMT types to Naga IR types.
 Supports configurable precision (f32/f64) for density computations.
 */
 
-use std::vec;
+use std::{cell::RefMut, vec};
 
-use naga::{Handle, Scalar, ScalarKind, Type, TypeInner, VectorSize};
+use naga::{Handle, Module, Scalar, ScalarKind, Type, TypeInner, VectorSize};
 
-use crate::spmt::model as spmt;
+use crate::{spmt::model as spmt, transform_naga::extern_functions::ExternFunctionConverter};
 
 /// Precision mode for GPU shader computation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,12 +45,18 @@ pub struct TypeCache {
     pub vec3f_ty: Handle<Type>,
     pub vec3i_ty: Handle<Type>,
     pub vec3u_ty: Handle<Type>,
+    pub perm_array_ty: Handle<Type>,
     pub perm_table_ty: Handle<Type>,
 }
 
 impl TypeCache {
     /// Register all commonly used types in the module and cache their handles.
-    pub fn register(types: &mut naga::UniqueArena<Type>, precision: Precision) -> Self {
+    pub fn register(
+        mut module: RefMut<'_, Module>,
+        precision: Precision,
+        extern_converter: &mut ExternFunctionConverter,
+    ) -> Self {
+        let types = &mut module.types;
         let float_scalar = precision.float_scalar();
 
         let float_ty = types.insert(
@@ -124,10 +130,10 @@ impl TypeCache {
             naga::Span::UNDEFINED,
         );
 
-        // Permutation tables are arrays of 256 i32 values.
-        let perm_table_ty = types.insert(
+        // Raw permutation data: arrays of 256 i32 values.
+        let perm_array_ty = types.insert(
             Type {
-                name: Some("PermutationTable".into()),
+                name: Some("PermutationTableData".into()),
                 inner: TypeInner::Array {
                     base: i32_ty,
                     size: naga::ArraySize::Constant(core::num::NonZeroU32::new(256).unwrap()),
@@ -136,7 +142,12 @@ impl TypeCache {
             },
             naga::Span::UNDEFINED,
         );
+        drop(types);
 
+        // Perlin generator data that bundles permutation table and octave origins.
+        let perm_table_ty = extern_converter.embed_wgsl_struct(&mut module, "PerlinNoiseGenerator");
+
+        let types = &mut module.types;
         let output_ty = types.insert(
             Type {
                 name: Some("Output".into()),
@@ -157,6 +168,7 @@ impl TypeCache {
             vec3f_ty,
             vec3i_ty,
             vec3u_ty,
+            perm_array_ty,
             perm_table_ty,
             output_ty,
         }

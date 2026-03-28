@@ -260,13 +260,13 @@ impl<'m, 'a, 'b> ExprContext<'m, 'a, 'b> {
                     });
 
                 // Get the function argument expression (pointer to array)
-                //let base_expr = self.append_and_emit(Expression::GlobalVariable(arg_info.variable));
                 let g_var_expr = self.func.expressions.append(
                     Expression::GlobalVariable(arg_info.variable),
                     Span::UNDEFINED,
                 );
-                let base_expr = self.append_and_emit(Expression::Load {
-                    pointer: g_var_expr,
+                let member_ptr = self.append_and_emit(Expression::AccessIndex {
+                    base: g_var_expr,
+                    index: arg_info.member_index,
                 });
                 // Compute the index expression
                 let index_expr = if let Some(idx) = index {
@@ -283,10 +283,11 @@ impl<'m, 'a, 'b> ExprContext<'m, 'a, 'b> {
                 };
 
                 // Array access
-                self.append_and_emit(Expression::Access {
-                    base: base_expr,
+                let elem_ptr = self.append_and_emit(Expression::Access {
+                    base: member_ptr,
                     index: index_expr,
-                })
+                });
+                self.append_and_emit(Expression::Load { pointer: elem_ptr })
             }
 
             spmt::Expression::PermutationTable(input) => {
@@ -303,13 +304,16 @@ impl<'m, 'a, 'b> ExprContext<'m, 'a, 'b> {
                         )
                     });
 
-                //self.append_and_emit(Expression::LoadExpression::GlobalVariable(arg_info.variable))
                 let g_var_expr = self.func.expressions.append(
                     Expression::GlobalVariable(arg_info.variable),
                     Span::UNDEFINED,
                 );
+                let member_ptr = self.append_and_emit(Expression::AccessIndex {
+                    base: g_var_expr,
+                    index: arg_info.member_index,
+                });
                 self.append_and_emit(Expression::Load {
-                    pointer: g_var_expr,
+                    pointer: member_ptr,
                 })
             }
 

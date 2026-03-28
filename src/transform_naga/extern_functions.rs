@@ -23,7 +23,6 @@ use crate::spmt::model as spmt;
 
 #[derive(Debug)]
 pub struct ExternFunctionConverter<'a> {
-    type_cache: &'a TypeCache,
     helper_module: &'a naga::Module,
 
     converted_functions: RefCell<HashMap<Handle<Function>, Handle<Function>>>,
@@ -31,9 +30,8 @@ pub struct ExternFunctionConverter<'a> {
 }
 
 impl<'a> ExternFunctionConverter<'a> {
-    pub fn new(type_cache: &'a TypeCache, helper_module: &'a naga::Module) -> Self {
+    pub fn new(helper_module: &'a naga::Module) -> Self {
         ExternFunctionConverter {
-            type_cache,
             helper_module,
             converted_functions: RefCell::new(HashMap::new()),
             converted_types: RefCell::new(HashMap::new()),
@@ -161,6 +159,11 @@ impl<'a> ExternFunctionConverter<'a> {
         module: &'a mut RefMut<'_, naga::Module>,
         src: Handle<naga::Type>,
     ) -> Handle<naga::Type> {
+        // if the type was already copied, return the existing handle
+        if let Some(&existing) = self.converted_types.borrow().get(&src) {
+            return existing;
+        }
+
         let src_ty = &self.helper_module.types[src];
         let new_inner = match &src_ty.inner {
             naga::TypeInner::Scalar(scalar) => naga::TypeInner::Scalar(*scalar),
@@ -174,6 +177,21 @@ impl<'a> ExternFunctionConverter<'a> {
                     base,
                     size: *size,
                     stride: *stride,
+                }
+            }
+            naga::TypeInner::Struct { members, span } => {
+                let members = members
+                    .iter()
+                    .map(|m| naga::StructMember {
+                        name: m.name.clone(),
+                        ty: self.copy_type_with_remap(module, m.ty),
+                        binding: m.binding.clone(),
+                        offset: m.offset,
+                    })
+                    .collect();
+                naga::TypeInner::Struct {
+                    members,
+                    span: *span,
                 }
             }
             _ => unimplemented!("Unsupported type inner for copying: {:?}", src_ty.inner),
@@ -232,5 +250,23 @@ impl<'a> ExternFunctionConverter<'a> {
                 _ => {}
             }
         }
+    }
+
+    //
+    pub fn embed_wgsl_struct(
+        &self,
+        module: &mut RefMut<'_, naga::Module>,
+        name: &str,
+    ) -> Handle<naga::Type> {
+        // Find the struct by name
+        let (handle, _) = self
+            .helper_module
+            .types
+            .iter()
+            .find(|(_, t)| t.name.as_deref() == Some(name))
+            .unwrap_or_else(|| {
+                panic!("Helper struct '{}' not found in helper module!", name);
+            });
+        self.copy_type_with_remap(module, handle)
     }
 }

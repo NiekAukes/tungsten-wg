@@ -678,7 +678,11 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
 
                 let mut bs = self.builder_state.take().unwrap();
                 let old_dimensions = bs.working_dimensions;
-                let dimensions = (4, 1, 4);
+                let dimensions = (
+                    1.max(old_dimensions.0 / 4),
+                    old_dimensions.1,
+                    1.max(old_dimensions.2 / 4),
+                );
                 let old_scaled_position = bs.working_scaled_position;
                 let old_scaled_origin = bs.working_scaled_origin;
 

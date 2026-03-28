@@ -197,32 +197,49 @@ pub fn convert_density_function<'a, 'b>(
         Span::UNDEFINED,
     );
 
-    let mut bind_counter = 3; // Start after origin's binding
+    let mut bind_counter = 3; // Start after origin/output/dimensions
 
-    // === Add density input arguments ===
-    for input in &spmt_df.density_inputs {
-        let array_len = ensure_alignment(input.dimensions.flatten());
-        let array_ty =
-            type_cache.make_density_array_type(&mut module.borrow_mut().types, array_len);
-        let fname = match &input.density_function.canonical_name {
-            Some(name) => name.clone(),
-            None => format!("input_{}", input.density_function.addr() as usize),
-        };
-        let param_name = sanitize_name(&format!("input_{}", fname));
+    // === Pack density inputs into a single storage binding ===
+    if !spmt_df.density_inputs.is_empty() {
+        let mut density_members = Vec::new();
+        let mut density_member_info = Vec::new();
+        let mut density_offset = 0u32;
 
-        // naga_func.arguments.push(FunctionArgument {
-        //     name: Some(param_name),
-        //     ty: array_ty,
-        //     binding: None,
-        // });
+        for input in &spmt_df.density_inputs {
+            let array_len = ensure_alignment(input.dimensions.flatten());
+            let array_ty =
+                type_cache.make_density_array_type(&mut module.borrow_mut().types, array_len);
+            let fname = match &input.density_function.canonical_name {
+                Some(name) => name.clone(),
+                None => format!("input_{}", input.density_function.addr() as usize),
+            };
+            let member_name = sanitize_name(&format!("input_{}", fname));
+            let member_size = array_len * 4;
 
-        // let key = InputKey::from(input);
-        // converter.register_density_arg(key, array_ty);
+            density_members.push(naga::StructMember {
+                name: Some(member_name),
+                ty: array_ty,
+                binding: None,
+                offset: density_offset,
+            });
+            density_member_info.push((InputKey::from(input), array_ty));
+            density_offset += member_size;
+        }
 
-        // add global variable for this density input
-        let handle = module.borrow_mut().global_variables.append(
+        let packed_density_ty = module.borrow_mut().types.insert(
+            naga::Type {
+                name: Some("DensityInputs".into()),
+                inner: naga::TypeInner::Struct {
+                    members: density_members,
+                    span: density_offset,
+                },
+            },
+            Span::UNDEFINED,
+        );
+
+        let density_handle = module.borrow_mut().global_variables.append(
             naga::GlobalVariable {
-                name: Some(param_name.clone()),
+                name: Some("density_inputs".into()),
                 space: naga::AddressSpace::Storage {
                     access: StorageAccess::LOAD,
                 },
@@ -230,7 +247,7 @@ pub fn convert_density_function<'a, 'b>(
                     group: 0,
                     binding: bind_counter,
                 }),
-                ty: array_ty,
+                ty: packed_density_ty,
                 init: None,
                 memory_decorations: MemoryDecorations::default(),
             },
@@ -238,23 +255,43 @@ pub fn convert_density_function<'a, 'b>(
         );
         bind_counter += 1;
 
-        let key = InputKey::from(input);
-        converter.register_density_arg(key, handle, array_ty);
+        for (member_index, (key, array_ty)) in density_member_info.into_iter().enumerate() {
+            converter.register_density_arg(key, density_handle, member_index as u32, array_ty);
+        }
     }
 
-    // === Add permutation table arguments ===
-    for input in &spmt_df.permutation_table_inputs {
-        let param_name = permutation_table_var_name(input);
-        // naga_func.arguments.push(FunctionArgument {
-        //     name: Some(param_name.clone()),
-        //     ty: type_cache.perm_table_ty,
-        //     binding: None,
-        // });
-        // converter.register_perm_table_arg(param_name);
-        // add global variable for this permutation table
-        let handle = module.borrow_mut().global_variables.append(
-            naga::GlobalVariable {
+    // === Pack permutation tables into a single storage binding ===
+    if !spmt_df.permutation_table_inputs.is_empty() {
+        let mut perm_members = Vec::new();
+        let mut perm_names = Vec::new();
+        let mut perm_offset = 0u32;
+
+        for input in &spmt_df.permutation_table_inputs {
+            let param_name = permutation_table_var_name(input);
+            perm_members.push(naga::StructMember {
                 name: Some(param_name.clone()),
+                ty: type_cache.perm_table_ty,
+                binding: None,
+                offset: perm_offset,
+            });
+            perm_names.push(param_name);
+            perm_offset += 1036;
+        }
+
+        let packed_perm_ty = module.borrow_mut().types.insert(
+            naga::Type {
+                name: Some("PermutationTables".into()),
+                inner: naga::TypeInner::Struct {
+                    members: perm_members,
+                    span: perm_offset,
+                },
+            },
+            Span::UNDEFINED,
+        );
+
+        let perm_handle = module.borrow_mut().global_variables.append(
+            naga::GlobalVariable {
+                name: Some("perm_tables".into()),
                 space: naga::AddressSpace::Storage {
                     access: StorageAccess::LOAD,
                 },
@@ -262,14 +299,17 @@ pub fn convert_density_function<'a, 'b>(
                     group: 0,
                     binding: bind_counter,
                 }),
-                ty: type_cache.perm_table_ty,
+                ty: packed_perm_ty,
                 init: None,
                 memory_decorations: MemoryDecorations::default(),
             },
             Span::UNDEFINED,
         );
         bind_counter += 1;
-        converter.register_perm_table_arg(handle, param_name);
+
+        for (member_index, param_name) in perm_names.into_iter().enumerate() {
+            converter.register_perm_table_arg(perm_handle, member_index as u32, param_name);
+        }
     }
 
     // === Register pos3 and origin argument expressions in var_map ===
@@ -370,10 +410,10 @@ pub fn convert_density_function<'a, 'b>(
     }
 
     module.borrow_mut().entry_points.push(naga::EntryPoint {
-        name: naga_func.name.clone().unwrap_or_else(|| "main".into()),
+        name: "main".into(),
         stage: naga::ShaderStage::Compute,
         function: naga_func,
-        workgroup_size: [16, 1, 16],
+        workgroup_size: [4, 8, 4],
         early_depth_test: None,
         workgroup_size_overrides: None,
         mesh_info: None,

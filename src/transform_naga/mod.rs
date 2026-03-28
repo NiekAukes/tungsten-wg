@@ -84,8 +84,10 @@ impl<'m> From<spmt::Var<'m>> for InputKey {
 /// Tracks a density function argument: its parameter index and array length.
 #[derive(Debug, Clone)]
 pub struct DensityArgInfo {
-    /// Index of this argument in the naga function's argument list.
+    /// Global variable handle of the packed density input struct.
     pub variable: Handle<GlobalVariable>,
+    /// Member index inside the packed density input struct.
+    pub member_index: u32,
     /// The naga type handle for the array type.
     pub array_ty: Handle<naga::Type>,
 }
@@ -93,8 +95,10 @@ pub struct DensityArgInfo {
 /// Tracks a permutation table argument: its parameter index.
 #[derive(Debug, Clone)]
 pub struct PermTableArgInfo {
-    /// Index of this argument in the naga function's argument list.
+    /// Global variable handle of the packed permutation table struct.
     pub variable: Handle<GlobalVariable>,
+    /// Member index inside the packed permutation table struct.
+    pub member_index: u32,
 }
 
 /// Converter state for transforming a single SPMT function to Naga IR.
@@ -159,6 +163,7 @@ impl<'a> NagaFunctionConverter<'a> {
         &mut self,
         key: InputKey,
         result: Handle<GlobalVariable>,
+        member_index: u32,
         array_ty: Handle<naga::Type>,
     ) {
         // let idx = self.arg_count;
@@ -175,20 +180,31 @@ impl<'a> NagaFunctionConverter<'a> {
             key,
             DensityArgInfo {
                 variable: result,
+                member_index,
                 array_ty,
             },
         );
     }
 
     /// Register a permutation table argument. Returns the argument index.
-    pub fn register_perm_table_arg(&mut self, handle: Handle<GlobalVariable>, name: String) {
+    pub fn register_perm_table_arg(
+        &mut self,
+        handle: Handle<GlobalVariable>,
+        member_index: u32,
+        name: String,
+    ) {
         // let idx = self.arg_count;
         // self.perm_table_arg_map
         //     .insert(name, PermTableArgInfo { arg_index: idx });
         // self.arg_count += 1;
         // idx
-        self.perm_table_arg_map
-            .insert(name, PermTableArgInfo { variable: handle });
+        self.perm_table_arg_map.insert(
+            name,
+            PermTableArgInfo {
+                variable: handle,
+                member_index,
+            },
+        );
     }
 
     /// Register a positional argument (pos3, origin, etc.). Returns the argument index.
@@ -220,11 +236,12 @@ pub fn convert_spmt_to_naga(
 
     for (i, density_function) in program.density_functions.iter().enumerate() {
         let module = Rc::new(RefCell::new(naga::Module::default()));
-        let type_cache = types::TypeCache::register(&mut module.borrow_mut().types, precision);
+
+        let mut extern_converter = ExternFunctionConverter::new(&helpers);
+        let type_cache =
+            types::TypeCache::register(module.borrow_mut(), precision, &mut extern_converter);
 
         let mut already_converted: HashMap<*const (), Handle<Function>> = HashMap::new();
-
-        let extern_converter = ExternFunctionConverter::new(&type_cache, &helpers);
 
         function::convert_density_function(
             density_function,
