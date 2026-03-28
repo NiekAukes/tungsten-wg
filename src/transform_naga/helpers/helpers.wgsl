@@ -25,13 +25,15 @@ fn perlin_perm_(perm: array<i32, 256>, index: i32) -> i32 {
     return perm[u32(index & 255)] & 255;
 }
 
+const GRADX = array<f32, 16>( 1., -1.,  1., -1.,  1., -1.,  1., -1.,  0.,  0.,  0.,  0.,  1.,  0., -1.,  0.);
+const GRADY = array<f32, 16>( 1.,  1., -1., -1.,  0.,  0.,  0.,  0.,  1., -1.,  1., -1.,  1., -1.,  1., -1.);
+const GRADZ = array<f32, 16>( 0.,  0.,  0.,  0.,  1.,  1., -1., -1.,  1.,  1., -1., -1.,  0.,  1.,  0., -1.);
+
 // Dot product with one of Minecraft's 16 gradient vectors (GRAD3 in perlin.rs).
 fn perlin_grad_(hash: i32, x: f32, y: f32, z: f32) -> f32 {
     let h = u32(hash & 15);
-    var gx = array<f32, 16>( 1., -1.,  1., -1.,  1., -1.,  1., -1.,  0.,  0.,  0.,  0.,  1.,  0., -1.,  0.);
-    var gy = array<f32, 16>( 1.,  1., -1., -1.,  0.,  0.,  0.,  0.,  1., -1.,  1., -1.,  1., -1.,  1., -1.);
-    var gz = array<f32, 16>( 0.,  0.,  0.,  0.,  1.,  1., -1., -1.,  1.,  1., -1., -1.,  0.,  1.,  0., -1.);
-    return gx[h] * x + gy[h] * y + gz[h] * z;
+    
+    return GRADX[h] * x + GRADY[h] * y + GRADZ[h] * z;
 }
 
 // Quintic fade curve: 6t^5 - 15t^4 + 10t^3

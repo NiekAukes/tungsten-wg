@@ -14,8 +14,8 @@ use std::{
 };
 
 use naga::{
-    Arena, Block, Expression, Function, FunctionArgument, FunctionResult, Handle, Literal, Span,
-    Statement,
+    Arena, Block, Constant, Expression, Function, FunctionArgument, FunctionResult, Handle,
+    Literal, Span, Statement,
 };
 
 use super::types::TypeCache;
@@ -27,6 +27,9 @@ pub struct ExternFunctionConverter<'a> {
 
     converted_functions: RefCell<HashMap<Handle<Function>, Handle<Function>>>,
     converted_types: RefCell<HashMap<Handle<naga::Type>, Handle<naga::Type>>>,
+    converted_constants: RefCell<HashMap<Handle<naga::Constant>, Handle<naga::Constant>>>,
+    converted_global_expressions:
+        RefCell<HashMap<Handle<naga::Expression>, Handle<naga::Expression>>>,
 }
 
 impl<'a> ExternFunctionConverter<'a> {
@@ -35,6 +38,8 @@ impl<'a> ExternFunctionConverter<'a> {
             helper_module,
             converted_functions: RefCell::new(HashMap::new()),
             converted_types: RefCell::new(HashMap::new()),
+            converted_constants: RefCell::new(HashMap::new()),
+            converted_global_expressions: RefCell::new(HashMap::new()),
         }
     }
 
@@ -144,7 +149,7 @@ impl<'a> ExternFunctionConverter<'a> {
         };
 
         self.remap_local_variable(module, &mut dst_function.local_variables);
-        self.remap_expression(module, &mut dst_function.expressions);
+        self.remap_expressions(module, &mut dst_function.expressions);
         self.remap_statement(module, &mut dst_function.body);
 
         let dst_handle = module.functions.append(dst_function, Span::UNDEFINED);
@@ -205,23 +210,46 @@ impl<'a> ExternFunctionConverter<'a> {
         h
     }
 
-    pub fn remap_expression(
+    pub fn remap_expressions(
         &self,
         module: &'a mut RefMut<'_, naga::Module>,
         expressions: &mut Arena<Expression>,
     ) {
         for (_, expr) in expressions.iter_mut() {
-            match expr {
-                Expression::CallResult(c) => {
-                    let new_func = self.copy_function_into_module(module, *c);
-                    *c = new_func;
-                }
-                Expression::Compose { ty, components: _ } => {
-                    let new_ty = self.copy_type_with_remap(module, *ty);
-                    *ty = new_ty;
-                }
-                _ => {}
+            // match expr {
+            //     Expression::CallResult(c) => {
+            //         let new_func = self.copy_function_into_module(module, *c);
+            //         *c = new_func;
+            //     }
+            //     Expression::Compose { ty, components: _ } => {
+            //         let new_ty = self.copy_type_with_remap(module, *ty);
+            //         *ty = new_ty;
+            //     }
+            //     Expression::Constant(h) => {
+            //         let new_const = self.copy_constant_with_remap(module, *h);
+            //         *h = new_const;
+            //     }
+            //     _ => {}
+            // }
+            self.remap_expression(module, expr);
+        }
+    }
+
+    fn remap_expression(&self, module: &'a mut RefMut<'_, naga::Module>, expr: &mut Expression) {
+        match expr {
+            Expression::CallResult(c) => {
+                let new_func = self.copy_function_into_module(module, *c);
+                *c = new_func;
             }
+            Expression::Compose { ty, components: _ } => {
+                let new_ty = self.copy_type_with_remap(module, *ty);
+                *ty = new_ty;
+            }
+            Expression::Constant(h) => {
+                let new_const = self.copy_constant_with_remap(module, *h);
+                *h = new_const;
+            }
+            _ => {}
         }
     }
 
@@ -250,6 +278,160 @@ impl<'a> ExternFunctionConverter<'a> {
                 _ => {}
             }
         }
+    }
+
+    pub fn copy_constant_with_remap(
+        &self,
+        module: &'a mut RefMut<'_, naga::Module>,
+        src: Handle<naga::Constant>,
+    ) -> Handle<naga::Constant> {
+        if let Some(&existing) = self.converted_constants.borrow().get(&src) {
+            return existing;
+        }
+
+        let src_const = &self.helper_module.constants[src];
+        let new_ty = self.copy_type_with_remap(module, src_const.ty);
+        let new_init = self.copy_const_expression(module, src_const.init);
+        let new_const = Constant {
+            name: src_const.name.clone(),
+            ty: new_ty,
+            init: new_init,
+        };
+        let handle = module.constants.append(new_const, Span::UNDEFINED);
+        self.converted_constants.borrow_mut().insert(src, handle);
+        handle
+    }
+
+    pub fn copy_const_expression(
+        &self,
+        module: &'a mut RefMut<'_, naga::Module>,
+        src: Handle<naga::Expression>,
+    ) -> Handle<naga::Expression> {
+        if let Some(&existing) = self.converted_global_expressions.borrow().get(&src) {
+            return existing;
+        }
+
+        let src_expr = &self.helper_module.global_expressions[src];
+        let new_expr = match src_expr {
+            Expression::Literal(literal) => Expression::Literal(*literal),
+            Expression::Constant(handle) => {
+                Expression::Constant(self.copy_constant_with_remap(module, *handle))
+            }
+            Expression::Override(handle) => Expression::Override(*handle),
+            Expression::ZeroValue(handle) => {
+                Expression::ZeroValue(self.copy_type_with_remap(module, *handle))
+            }
+            Expression::Compose { ty, components } => Expression::Compose {
+                ty: self.copy_type_with_remap(module, *ty),
+                components: components
+                    .iter()
+                    .map(|component| self.copy_const_expression(module, *component))
+                    .collect(),
+            },
+            Expression::Access { base, index } => Expression::Access {
+                base: self.copy_const_expression(module, *base),
+                index: self.copy_const_expression(module, *index),
+            },
+            Expression::AccessIndex { base, index } => Expression::AccessIndex {
+                base: self.copy_const_expression(module, *base),
+                index: *index,
+            },
+            Expression::Splat { size, value } => Expression::Splat {
+                size: *size,
+                value: self.copy_const_expression(module, *value),
+            },
+            Expression::Swizzle {
+                size,
+                vector,
+                pattern,
+            } => Expression::Swizzle {
+                size: *size,
+                vector: self.copy_const_expression(module, *vector),
+                pattern: *pattern,
+            },
+            Expression::Unary { op, expr } => Expression::Unary {
+                op: *op,
+                expr: self.copy_const_expression(module, *expr),
+            },
+            Expression::Binary { op, left, right } => Expression::Binary {
+                op: *op,
+                left: self.copy_const_expression(module, *left),
+                right: self.copy_const_expression(module, *right),
+            },
+            Expression::Select {
+                condition,
+                accept,
+                reject,
+            } => Expression::Select {
+                condition: self.copy_const_expression(module, *condition),
+                accept: self.copy_const_expression(module, *accept),
+                reject: self.copy_const_expression(module, *reject),
+            },
+            Expression::Relational { fun, argument } => Expression::Relational {
+                fun: *fun,
+                argument: self.copy_const_expression(module, *argument),
+            },
+            Expression::Math {
+                fun,
+                arg,
+                arg1,
+                arg2,
+                arg3,
+            } => Expression::Math {
+                fun: *fun,
+                arg: self.copy_const_expression(module, *arg),
+                arg1: arg1.map(|handle| self.copy_const_expression(module, handle)),
+                arg2: arg2.map(|handle| self.copy_const_expression(module, handle)),
+                arg3: arg3.map(|handle| self.copy_const_expression(module, handle)),
+            },
+            Expression::As {
+                expr,
+                kind,
+                convert,
+            } => Expression::As {
+                expr: self.copy_const_expression(module, *expr),
+                kind: *kind,
+                convert: *convert,
+            },
+            Expression::FunctionArgument(_)
+            | Expression::GlobalVariable(_)
+            | Expression::LocalVariable(_)
+            | Expression::Load { .. }
+            | Expression::ImageSample { .. }
+            | Expression::ImageLoad { .. }
+            | Expression::ImageQuery { .. }
+            | Expression::Derivative { .. }
+            | Expression::CallResult(_)
+            | Expression::AtomicResult { .. }
+            | Expression::WorkGroupUniformLoadResult { .. }
+            | Expression::ArrayLength(_)
+            | Expression::RayQueryVertexPositions { .. }
+            | Expression::RayQueryProceedResult
+            | Expression::RayQueryGetIntersection { .. }
+            | Expression::SubgroupBallotResult
+            | Expression::SubgroupOperationResult { .. }
+            | Expression::CooperativeLoad { .. }
+            | Expression::CooperativeMultiplyAdd { .. } => {
+                panic!(
+                    "Unsupported const expression in helper module: {:?}",
+                    src_expr
+                )
+            }
+        };
+
+        let handle = module.global_expressions.append(new_expr, Span::UNDEFINED);
+        self.converted_global_expressions
+            .borrow_mut()
+            .insert(src, handle);
+        handle
+    }
+
+    pub fn copy_expression_with_remap(
+        &self,
+        module: &'a mut RefMut<'_, naga::Module>,
+        src: Handle<naga::Expression>,
+    ) -> Handle<naga::Expression> {
+        self.copy_const_expression(module, src)
     }
 
     //
