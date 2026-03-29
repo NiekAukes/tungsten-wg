@@ -160,6 +160,7 @@ pub struct MinecraftData<'m> {
     pub noise_settings: HashMap<String, NoiseGeneratorSettings<'m>>,
     pub density_functions: HashMap<String, Density<'m>>,
     pub normal_noises: HashMap<String, NormalNoise<'m>>,
+    chunk_size: usize,
 }
 
 impl<'m> Debug for MinecraftData<'m> {
@@ -172,16 +173,17 @@ impl<'m> Debug for MinecraftData<'m> {
     }
 }
 
-const SZ_XZ: i32 = 16 * 8;
+//const SZ_XZ: i32 = 16 * 8;
 
 impl<'m> MinecraftData<'m> {
-    pub fn new(arena: &'m Bump, raw: &'m MinecraftDataRaw) -> MinecraftData<'m> {
+    pub fn new(arena: &'m Bump, raw: &'m MinecraftDataRaw, chunk_size: usize) -> MinecraftData<'m> {
         MinecraftData {
             arena: arena,
             raw_data: raw,
             noise_settings: HashMap::new(),
             density_functions: HashMap::new(),
             normal_noises: HashMap::new(),
+            chunk_size,
         }
     }
 
@@ -190,7 +192,6 @@ impl<'m> MinecraftData<'m> {
         for (name, json_str) in &raw.normal_noises {
             let parsed: NormalNoiseType = serde_json::from_str(&json_str).unwrap();
             let noise = self.arena.alloc(parsed);
-            println!("Parsed NormalNoise: {:?}", name);
             self.normal_noises.insert(name.to_string(), noise);
         }
 
@@ -369,7 +370,11 @@ impl<'m> MinecraftData<'m> {
             erosion: DensitySource::SingleSamplingDensity { density: erosion },
             final_density: DensitySource::MultiSamplingDensity {
                 density: final_density,
-                dimensions: (SZ_XZ, settings.height, SZ_XZ),
+                dimensions: (
+                    self.chunk_size as i32,
+                    settings.height,
+                    self.chunk_size as i32,
+                ),
             },
             fluid_level_floodedness: DensitySource::SingleSamplingDensity {
                 density: fluid_level_floodedness,

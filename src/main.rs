@@ -1,5 +1,6 @@
-use std::{collections::HashMap, env};
+use std::{collections::HashMap, env, path::PathBuf, thread::Builder};
 
+use clap::{Parser, arg, command};
 use serde::de;
 
 use crate::{
@@ -29,45 +30,106 @@ pub mod transform_orchestration_gpu;
 pub mod transform_orchestration_rcl;
 pub mod transform_rcl;
 
+#[derive(Parser, Debug)]
+#[command(author, version, about = "Minecraft Worldgen SPMT Transformer & Codegen", long_about = None)]
+struct Args {
+    /// The mod folder to process (e.g., "JJThunderToTheMax")
+    #[arg(short, long, default_value = "vanilla_worldgen_1.21.1")]
+    mod_folder: String,
+
+    /// The base Minecraft worldgen version/folder to load
+    #[arg(short, long, default_value = "vanilla_worldgen_1.21.1")]
+    base_version: String,
+
+    /// Output directory for generated code and shaders
+    #[arg(short, long, default_value = "../rcl_density")]
+    output_dir: PathBuf,
+
+    /// Whether to skip WGSL shader generation
+    #[arg(long, default_value_t = false)]
+    skip_shaders: bool,
+
+    // chunks per batch
+    /// Chunk size for generation (e.g., 16 for 16x16 chunks, 32 for 32x32, etc.)
+    /// Only useful for benchmarking for now
+    /// Maximum is 128 for cross compatibility on GPUs
+    #[arg(long, default_value_t = 16)]
+    chunk_size: usize,
+
+    /// Whether to output intermediate representations to files
+    #[arg(long, default_value_t = false)]
+    emit_intermediates: bool,
+
+    /// Enable verbose logging of arena usage
+    #[arg(short, long)]
+    verbose: bool,
+}
+
 pub fn main() {
+    let args = Args::parse();
+
+    let h = Builder::new()
+        .name("Main Thread".into())
+        .stack_size(16 * 1024 * 1024) // 16 MB stack size
+        .spawn(move || {
+            run_with_args(args);
+        })
+        .expect("Failed to spawn main thread");
+    h.join().expect("Main thread panicked");
+}
+
+fn run_with_args(args: Args) {
     let mut data = config_load::MinecraftDataRaw::new();
 
-    // get mod folder from command line arguments, if not provided, default to "vanilla_worldgen_1.21.1"
-    let args: Vec<String> = env::args().collect();
-    let mod_folder = if args.len() > 1 {
-        &args[1]
-    } else {
-        "vanilla_worldgen_1.21.1"
-    };
+    // Load configs based on CLI args
+    config_load::load_all_configs(&mut data, &args.base_version, None);
+    if args.mod_folder != args.base_version {
+        config_load::load_all_configs(&mut data, &args.mod_folder, None);
+    }
 
-    // get
-
-    config_load::load_all_configs(&mut data, "vanilla_worldgen_1.21.1", None);
-    config_load::load_all_configs(&mut data, "JJThunderToTheMax", None);
-    //config_load::load_all_configs(&mut data, "testmod", None);
-    // reexport the config
-    // config_load::reexport(&data, "reexport_t");
-
-    let arena: bumpalo::Bump = bumpalo::Bump::with_capacity(1 * 1024 * 1024); // 1 MB initial capacity
-    let mut mcdata = parse::MinecraftData::new(&arena, &data);
+    let arena = bumpalo::Bump::with_capacity(1 * 1024 * 1024);
+    let mut mcdata = parse::MinecraftData::new(&arena, &data, args.chunk_size);
     mcdata.parse_from_raw();
-    println!(
-        "Final arena usage after parsing: {} MB",
-        arena.allocated_bytes() as f64 / (1024.0 * 1024.0)
-    );
 
-    // pretty print one of the density functions to a file
-    let density_function = mcdata
+    if args.verbose {
+        println!(
+            "Final arena usage after parsing: {:.2} MB",
+            arena.allocated_bytes() as f64 / (1024.0 * 1024.0)
+        );
+    }
+
+    // --- Core Logic (Density Functions & Transformations) ---
+    let noise_generator = mcdata
         .noise_settings
         .get("minecraft:overworld")
-        .unwrap()
-        .noise_router
-        .final_density;
-    let pretty = format!("{}", density_function.get_density());
-    std::fs::write("pretty_density_function.txt", pretty).expect("Unable to write file");
-    let dot = parse::dot::print_density_dot(density_function.get_density());
+        .expect("Could not find minecraft:overworld settings");
 
-    std::fs::write("density_function.dot", dot).expect("Unable to write file");
+    let transform_arena = bumpalo::Bump::with_capacity(1 * 1024 * 1024);
+    let transformer = transform_spmt::Transformer::new(&transform_arena);
+    let program = transformer.transform(noise_generator);
+
+    if args.verbose {
+        let bytes = transform_arena.allocated_bytes();
+        println!(
+            "Final arena usage after SPMT transformation: {:.2} MB",
+            bytes as f64 / (1024.0 * 1024.0)
+        );
+    }
+
+    if args.emit_intermediates {
+        // pretty print one of the density functions to a file
+        let density_function = mcdata
+            .noise_settings
+            .get("minecraft:overworld")
+            .unwrap()
+            .noise_router
+            .final_density;
+        let pretty = format!("{}", density_function.get_density());
+        std::fs::write("pretty_density_function.txt", pretty).expect("Unable to write file");
+        let dot = parse::dot::print_density_dot(density_function.get_density());
+
+        std::fs::write("density_function.dot", dot).expect("Unable to write file");
+    }
 
     let transform_arena = bumpalo::Bump::with_capacity(1 * 1024 * 1024); // 1 MB initial capacity
     let transformer = transform_spmt::Transformer::new(&transform_arena);
@@ -78,106 +140,108 @@ pub fn main() {
 
     drop(arena);
 
-    // print the final arena usage
-    let bytes = transform_arena.allocated_bytes();
-    println!(
-        "Final arena usage after SPMT transformation: {} MB",
-        bytes as f64 / (1024.0 * 1024.0)
-    );
-
-    let mut printer = spmt::pretty::Printer::new();
-    program.pretty(&mut printer);
-
-    let (out, name_cache) = printer.finish_with_name_cache();
-    // write the output to a file
-    std::fs::write("output.spmt", out).expect("Unable to write file");
+    if args.verbose {
+        // print the final arena usage
+        let bytes = transform_arena.allocated_bytes();
+        println!(
+            "Final arena usage after SPMT transformation: {} MB",
+            bytes as f64 / (1024.0 * 1024.0)
+        );
+    }
 
     // create a folder for the density DAGs
 
-    std::fs::create_dir_all("density_dags").expect("Unable to create directory");
-    let mut i = 0;
-    let mut name_cache_bor = Some(name_cache);
-    for (density_function, _) in &program.main_density_functions {
-        let ddag_root = *density_function;
-        let ddag = DensityDAG { root: ddag_root };
-        let mut printer =
-            spmt::pretty::Printer::new_with_name_cache(name_cache_bor.take().unwrap());
-        ddag.pretty(&mut printer);
-        let (dot_output, name_cache) = printer.finish_with_name_cache();
+    if args.emit_intermediates {
+        let mut printer = spmt::pretty::Printer::new();
+        program.pretty(&mut printer);
+        let (_, name_cache) = printer.finish_with_name_cache();
+        std::fs::create_dir_all("density_dags").expect("Unable to create directory");
+        let mut i = 0;
+        let mut name_cache_bor = Some(name_cache);
+        for (density_function, _) in &program.main_density_functions {
+            let ddag_root = *density_function;
+            let ddag = DensityDAG { root: ddag_root };
+            let mut printer =
+                spmt::pretty::Printer::new_with_name_cache(name_cache_bor.take().unwrap());
+            ddag.pretty(&mut printer);
+            let (dot_output, name_cache) = printer.finish_with_name_cache();
 
-        // sanitize the file name by replacing any characters that are not alphanumeric or underscores with underscores
-        let fname = density_function.canonical_name.clone().unwrap_or_else(|| {
-            name_cache
-                .get(&(*density_function).addr())
-                .cloned()
-                .unwrap_or_else(|| "unknown".into())
-        });
+            // sanitize the file name by replacing any characters that are not alphanumeric or underscores with underscores
+            let fname = density_function.canonical_name.clone().unwrap_or_else(|| {
+                name_cache
+                    .get(&(*density_function).addr())
+                    .cloned()
+                    .unwrap_or_else(|| "unknown".into())
+            });
 
-        name_cache_bor = Some(name_cache);
-        let file_name = format!(
-            "density_dags/{}.dot",
-            fname.replace(|c: char| !c.is_alphanumeric() && c != '_', "_")
-        );
+            name_cache_bor = Some(name_cache);
+            let file_name = format!(
+                "density_dags/{}.dot",
+                fname.replace(|c: char| !c.is_alphanumeric() && c != '_', "_")
+            );
 
-        match std::fs::write(&file_name, dot_output) {
-            Ok(_) => (),
-            Err(e) => {
-                eprintln!("Failed to write DOT file for density function {}: {}", i, e);
-                eprintln!("file name: {}", &file_name);
+            match std::fs::write(&file_name, dot_output) {
+                Ok(_) => (),
+                Err(e) => {
+                    eprintln!("Failed to write DOT file for density function {}: {}", i, e);
+                    eprintln!("file name: {}", &file_name);
+                }
             }
+            i += 1;
         }
-        i += 1;
-    }
 
-    std::fs::create_dir_all("density_functions").expect("Unable to create directory");
-    let mut i = 0;
+        std::fs::create_dir_all("density_functions").expect("Unable to create directory");
+        let mut i = 0;
 
-    for density_function in &program.density_functions {
-        // pretty print the density function to a file
-        let mut printer =
-            spmt::pretty::Printer::new_with_name_cache(name_cache_bor.take().unwrap());
-        density_function.pretty_with_deps(&mut printer);
-        let (dot_output, name_cache) = printer.finish_with_name_cache();
+        for density_function in &program.density_functions {
+            // pretty print the density function to a file
+            let mut printer =
+                spmt::pretty::Printer::new_with_name_cache(name_cache_bor.take().unwrap());
+            density_function.pretty_with_deps(&mut printer);
+            let (dot_output, name_cache) = printer.finish_with_name_cache();
 
-        let fname = density_function.canonical_name.clone().unwrap_or_else(|| {
-            name_cache
-                .get(&(*density_function).addr())
-                .cloned()
-                .unwrap_or_else(|| "unknown".into())
-        });
-        name_cache_bor = Some(name_cache);
-        let file_name = format!(
-            "density_functions/{}.spmt",
-            fname.replace(|c: char| !c.is_alphanumeric() && c != '_', "_")
-        );
+            let fname = density_function.canonical_name.clone().unwrap_or_else(|| {
+                name_cache
+                    .get(&(*density_function).addr())
+                    .cloned()
+                    .unwrap_or_else(|| "unknown".into())
+            });
+            name_cache_bor = Some(name_cache);
+            let file_name = format!(
+                "density_functions/{}.spmt",
+                fname.replace(|c: char| !c.is_alphanumeric() && c != '_', "_")
+            );
 
-        match std::fs::write(&file_name, dot_output) {
-            Ok(_) => (),
-            Err(e) => {
-                eprintln!(
-                    "Failed to write SPMT file for density function {}: {}",
-                    i, e
-                );
-                eprintln!("file name: {}", &file_name);
+            match std::fs::write(&file_name, dot_output) {
+                Ok(_) => (),
+                Err(e) => {
+                    eprintln!(
+                        "Failed to write SPMT file for density function {}: {}",
+                        i, e
+                    );
+                    eprintln!("file name: {}", &file_name);
+                }
             }
+            i += 1;
         }
-        i += 1;
     }
 
     // transform to orchestration
     let orchestration_arena = bumpalo::Bump::new();
     let orchestration = orchestrate::transform::transform_from_spmt(&program, &orchestration_arena);
 
-    let mut printer = spmt::pretty::Printer::new();
-    orchestration.pretty_wave_graph(&mut printer);
-    let orchestration_output = printer.finish();
-    std::fs::write("wave_graph.dot", orchestration_output).expect("Unable to write file");
+    if args.emit_intermediates {
+        let mut printer = spmt::pretty::Printer::new();
+        orchestration.pretty_wave_graph(&mut printer);
+        let orchestration_output = printer.finish();
+        std::fs::write("wave_graph.dot", orchestration_output).expect("Unable to write file");
 
-    let mut printer = spmt::pretty::Printer::new();
-    orchestration.pretty_wave_dependencies(&mut printer);
-    let orchestration_output = printer.finish();
-    std::fs::write("wave_dependencies.dot", orchestration_output).expect("Unable to write file");
-
+        let mut printer = spmt::pretty::Printer::new();
+        orchestration.pretty_wave_dependencies(&mut printer);
+        let orchestration_output = printer.finish();
+        std::fs::write("wave_dependencies.dot", orchestration_output)
+            .expect("Unable to write file");
+    }
     // convert one of the density functions to RCL
     // let rcl_arena = bumpalo::Bump::new();
     // let mut rcl_model = rcl::RCL::new();
@@ -215,18 +279,36 @@ pub fn main() {
     let orchestration_rcl = orchestration_conv.finish();
 
     // write the RCL functions to a file in a different folder
-    let folder = "../rcl_density";
+    //let folder = "../rcl_density";
     //let folder = "../Tungsten/libtungsten";
+    let folder = args.output_dir.as_path().to_str().unwrap();
+    std::fs::create_dir_all(folder).expect("Unable to create output directory");
 
     let rust_cg = RustCodeGenerator::new();
-    //println!("RCL Model: {:?}", rcl_model);
     let rcl_output = rust_cg.generate_module(&rcl_model);
     let orch_output = rust_cg.generate_module(&orchestration_rcl);
+
+    println!(
+        "Generated 'density_function.rs' ({} bytes)",
+        rcl_output.len()
+    );
+    println!("Generated 'orchestration.rs' ({} bytes)", orch_output.len());
+
     std::fs::write(format!("{}/src/density_function.rs", folder), rcl_output)
         .expect("Unable to write file");
     std::fs::write(format!("{}/src/orchestration.rs", folder), orch_output)
         .expect("Unable to write file");
 
+    if !args.skip_shaders {
+        gpu_codegen(&orchestration, &program, folder);
+    }
+}
+
+fn gpu_codegen(
+    orchestration: &orchestrate::model::Orchestration,
+    program: &spmt::model::SPMT,
+    folder: &str,
+) {
     // Generate GPU orchestrator code for each primary density
     let mut gpu_codegen = GpuOrchestrationCodegen::new();
     for primary in &orchestration.get_primary_shaders() {
@@ -276,9 +358,8 @@ pub fn main() {
                         let file_path = format!("{}/shaders/{}.wgsl", folder, name);
                         std::fs::write(&file_path, &wgsl).expect("Unable to write WGSL file");
                         println!(
-                            "Generated WGSL shader '{}' with {} functions ({} bytes)",
+                            "Generated WGSL shader '{}' ({} bytes)",
                             file_path,
-                            naga_module.functions.len() + 1, // +1 for the entry point function
                             wgsl.len()
                         );
                     }
@@ -321,7 +402,7 @@ mod tests {
         let mut data = config_load::MinecraftDataRaw::new();
         config_load::load_all_configs(&mut data, "vanilla_worldgen_1.19", None);
         let arena = bumpalo::Bump::with_capacity(10 * 1024 * 1024); // 10 MB initial capacity
-        let mut mcdata = parse::MinecraftData::new(&arena, &data);
+        let mut mcdata = parse::MinecraftData::new(&arena, &data, 16);
         mcdata.parse_from_raw();
         println!("{:?}", mcdata);
     }

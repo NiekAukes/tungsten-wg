@@ -107,10 +107,6 @@ impl<'a, 'm> Transformer<'a, 'm> {
                         .main_density_functions
                         .push((density_function, dimensions));
                     self.final_model.density_functions.push(density_function);
-                    println!(
-                        "Main density function: {:?}",
-                        density_function.canonical_name
-                    );
                 }
             }
         }
@@ -120,12 +116,6 @@ impl<'a, 'm> Transformer<'a, 'm> {
             noise_cache,
             ..
         } = self.builder_state.take().unwrap();
-
-        println!(
-            "Density function cache size: {}, Noise cache size: {}",
-            density_function_cache.len(),
-            noise_cache.len()
-        );
 
         for density_function in density_function_cache.values() {
             // check if the density function is already in the main density functions, and if not, add it to the final model
