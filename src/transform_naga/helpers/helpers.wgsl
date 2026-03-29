@@ -55,54 +55,108 @@ struct PerlinNoiseGenerator {
 // Perlin noise. Matches Minecraft's ImprovedNoise / sample_perlin_section with fade_y == yf.
 // Signature matches what the SPMT code generator emits:
 //   fn perlin(pos: vec3<f32>, perm: array<i32, 256>) -> f32
+// fn perlin(pos: vec3<f32>, generator: PerlinNoiseGenerator) -> f32 {
+//     let rpos3 = vec3<f32>(
+//         pos.x + generator.origin_x,
+//         pos.y + generator.origin_y,
+//         pos.z + generator.origin_z,
+//     );
+
+//     let xi = i32(floor(rpos3.x));
+//     let yi = i32(floor(rpos3.y));
+//     let zi = i32(floor(rpos3.z));
+
+//     let xf = rpos3.x - f32(xi);
+//     let yf = rpos3.y - f32(yi);
+//     let zf = rpos3.z - f32(zi);
+
+//     // Hash the lattice cube corner indices through the permutation table.
+//     let mi = perlin_perm_(generator.perm, xi);
+//     let mj = perlin_perm_(generator.perm, xi + 1);
+//     let k  = perlin_perm_(generator.perm, mi + yi);
+//     let l  = perlin_perm_(generator.perm, mi + yi + 1);
+//     let m  = perlin_perm_(generator.perm, mj + yi);
+//     let n  = perlin_perm_(generator.perm, mj + yi + 1);
+
+//     // Gradient dot products at the 8 corners of the unit cube.
+//     let d = perlin_grad_(perlin_perm_(generator.perm, k + zi),       xf,        yf,        zf);
+//     let e = perlin_grad_(perlin_perm_(generator.perm, m + zi),       xf - 1.0,  yf,        zf);
+//     let f = perlin_grad_(perlin_perm_(generator.perm, l + zi),       xf,        yf - 1.0,  zf);
+//     let g = perlin_grad_(perlin_perm_(generator.perm, n + zi),       xf - 1.0,  yf - 1.0,  zf);
+//     let h = perlin_grad_(perlin_perm_(generator.perm, k + zi + 1),   xf,        yf,        zf - 1.0);
+//     let o = perlin_grad_(perlin_perm_(generator.perm, m + zi + 1),   xf - 1.0,  yf,        zf - 1.0);
+//     let p = perlin_grad_(perlin_perm_(generator.perm, l + zi + 1),   xf,        yf - 1.0,  zf - 1.0);
+//     let q = perlin_grad_(perlin_perm_(generator.perm, n + zi + 1),   xf - 1.0,  yf - 1.0,  zf - 1.0);
+
+//     let rx = perlin_fade_(xf);
+//     let ry = perlin_fade_(yf); // fade_y == yf (sample_perlin passes h twice)
+//     let rz = perlin_fade_(zf);
+
+//     // Trilinear interpolation: lerp3(rx, ry, rz, d, e, f, g, h, o, p, q)
+//     return perlin_lerp_(rz,
+//         perlin_lerp_(ry,
+//             perlin_lerp_(rx, d, e),
+//             perlin_lerp_(rx, f, g)
+//         ),
+//         perlin_lerp_(ry,
+//             perlin_lerp_(rx, h, o),
+//             perlin_lerp_(rx, p, q)
+//         )
+//     );
+// }
+
+// Use a single vec3 array to reduce lookup overhead
+const GRADS = array<vec3<f32>, 16>(
+    vec3<f32>(1.,1.,0.),  vec3<f32>(-1.,1.,0.), vec3<f32>(1.,-1.,0.), vec3<f32>(-1.,-1.,0.),
+    vec3<f32>(1.,0.,1.),  vec3<f32>(-1.,0.,1.), vec3<f32>(1.,0.,-1.), vec3<f32>(-1.,0.,-1.),
+    vec3<f32>(0.,1.,1.),  vec3<f32>(0.,-1.,1.), vec3<f32>(0.,1.,-1.), vec3<f32>(0.,-1.,-1.),
+    vec3<f32>(1.,1.,0.),  vec3<f32>(0.,-1.,1.), vec3<f32>(-1.,1.,0.), vec3<f32>(0.,-1.,-1.)
+);
+
+fn perlin_fade_vec(t: vec3<f32>) -> vec3<f32> {
+    // 6t^5 - 15t^4 + 10t^3 optimized for vector math
+    return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+}
+
+fn perlin_grad_opt(hash: i32, p: vec3<f32>) -> f32 {
+    // Single lookup of a vec3 is faster than 3 lookups of f32
+    let g = GRADS[u32(hash & 15)];
+    return dot(g, p);
+}
+
+
 fn perlin(pos: vec3<f32>, generator: PerlinNoiseGenerator) -> f32 {
-    let rpos3 = vec3<f32>(
-        pos.x + generator.origin_x,
-        pos.y + generator.origin_y,
-        pos.z + generator.origin_z,
-    );
+    let rpos = pos + vec3<f32>(generator.origin_x, generator.origin_y, generator.origin_z);
+    
+    let pf = floor(rpos);
+    let pi = vec3<i32>(pf) & vec3<i32>(255); // Lattice coordinates
+    let f = rpos - pf;                      // Fractional part
+    let v = perlin_fade_vec(f);             // Quintic fade
+    
+    // Hash coordinates of the 8 cube corners
+    let p = generator.perm;
+    let A  = p[pi.x] + pi.y;
+    let AA = p[A & 255] + pi.z;
+    let AB = p[(A + 1) & 255] + pi.z;
+    let B  = p[(pi.x + 1) & 255] + pi.y;
+    let BA = p[B & 255] + pi.z;
+    let BB = p[(B + 1) & 255] + pi.z;
 
-    let xi = i32(floor(rpos3.x));
-    let yi = i32(floor(rpos3.y));
-    let zi = i32(floor(rpos3.z));
-
-    let xf = rpos3.x - f32(xi);
-    let yf = rpos3.y - f32(yi);
-    let zf = rpos3.z - f32(zi);
-
-    // Hash the lattice cube corner indices through the permutation table.
-    let mi = perlin_perm_(generator.perm, xi);
-    let mj = perlin_perm_(generator.perm, xi + 1);
-    let k  = perlin_perm_(generator.perm, mi + yi);
-    let l  = perlin_perm_(generator.perm, mi + yi + 1);
-    let m  = perlin_perm_(generator.perm, mj + yi);
-    let n  = perlin_perm_(generator.perm, mj + yi + 1);
-
-    // Gradient dot products at the 8 corners of the unit cube.
-    let d = perlin_grad_(perlin_perm_(generator.perm, k + zi),       xf,        yf,        zf);
-    let e = perlin_grad_(perlin_perm_(generator.perm, m + zi),       xf - 1.0,  yf,        zf);
-    let f = perlin_grad_(perlin_perm_(generator.perm, l + zi),       xf,        yf - 1.0,  zf);
-    let g = perlin_grad_(perlin_perm_(generator.perm, n + zi),       xf - 1.0,  yf - 1.0,  zf);
-    let h = perlin_grad_(perlin_perm_(generator.perm, k + zi + 1),   xf,        yf,        zf - 1.0);
-    let o = perlin_grad_(perlin_perm_(generator.perm, m + zi + 1),   xf - 1.0,  yf,        zf - 1.0);
-    let p = perlin_grad_(perlin_perm_(generator.perm, l + zi + 1),   xf,        yf - 1.0,  zf - 1.0);
-    let q = perlin_grad_(perlin_perm_(generator.perm, n + zi + 1),   xf - 1.0,  yf - 1.0,  zf - 1.0);
-
-    let rx = perlin_fade_(xf);
-    let ry = perlin_fade_(yf); // fade_y == yf (sample_perlin passes h twice)
-    let rz = perlin_fade_(zf);
-
-    // Trilinear interpolation: lerp3(rx, ry, rz, d, e, f, g, h, o, p, q)
-    return perlin_lerp_(rz,
-        perlin_lerp_(ry,
-            perlin_lerp_(rx, d, e),
-            perlin_lerp_(rx, f, g)
-        ),
-        perlin_lerp_(ry,
-            perlin_lerp_(rx, h, o),
-            perlin_lerp_(rx, p, q)
-        )
-    );
+    // Trilinear interpolation using the hardware 'mix' function
+    return mix(
+        mix(
+            mix(perlin_grad_opt(p[AA & 255],     f - vec3(0.,0.,0.)), 
+                perlin_grad_opt(p[(AA + 1) & 255], f - vec3(0.,0.,1.)), v.z),
+            mix(perlin_grad_opt(p[AB & 255],     f - vec3(0.,1.,0.)), 
+                perlin_grad_opt(p[(AB + 1) & 255], f - vec3(0.,1.,1.)), v.z), 
+            v.y),
+        mix(
+            mix(perlin_grad_opt(p[BA & 255],     f - vec3(1.,0.,0.)), 
+                perlin_grad_opt(p[(BA + 1) & 255], f - vec3(1.,0.,1.)), v.z),
+            mix(perlin_grad_opt(p[BB & 255],     f - vec3(1.,1.,0.)), 
+                perlin_grad_opt(p[(BB + 1) & 255], f - vec3(1.,1.,1.)), v.z), 
+            v.y),
+        v.x);
 }
 
 // Maps a cave value to a scale factor. Matches scale_caves() in utilsf64.rs.

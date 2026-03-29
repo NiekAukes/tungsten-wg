@@ -31,9 +31,20 @@ pub mod transform_rcl;
 
 pub fn main() {
     let mut data = config_load::MinecraftDataRaw::new();
+
+    // get mod folder from command line arguments, if not provided, default to "vanilla_worldgen_1.21.1"
+    let args: Vec<String> = env::args().collect();
+    let mod_folder = if args.len() > 1 {
+        &args[1]
+    } else {
+        "vanilla_worldgen_1.21.1"
+    };
+
+    // get
+
     config_load::load_all_configs(&mut data, "vanilla_worldgen_1.21.1", None);
-    //config_load::load_all_configs(&mut data, "JJThunderToTheMax", None);
-    config_load::load_all_configs(&mut data, "testmod", None);
+    config_load::load_all_configs(&mut data, "JJThunderToTheMax", None);
+    //config_load::load_all_configs(&mut data, "testmod", None);
     // reexport the config
     // config_load::reexport(&data, "reexport_t");
 

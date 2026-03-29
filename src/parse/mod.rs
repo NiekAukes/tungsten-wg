@@ -172,7 +172,7 @@ impl<'m> Debug for MinecraftData<'m> {
     }
 }
 
-const SZ_XZ: i32 = 16 * 9;
+const SZ_XZ: i32 = 16 * 8;
 
 impl<'m> MinecraftData<'m> {
     pub fn new(arena: &'m Bump, raw: &'m MinecraftDataRaw) -> MinecraftData<'m> {
