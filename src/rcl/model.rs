@@ -25,6 +25,7 @@ pub struct RCL<'m> {
     pub structs: Vec<StructRef<'m>>,
     pub main_functions: Vec<FunctionRef<'m>>,
     pub import_statements: Vec<String>,
+    pub constants: Vec<Constant<'m>>,
 }
 
 /// A low-level CPU function with typed parameters and return type
@@ -58,6 +59,12 @@ pub struct Variable {
     pub name: Option<String>,
     pub t: Type,
     pub mutable: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Constant<'m> {
+    pub var: Rc<Variable>,
+    pub value: Expression<'m>,
 }
 
 /// Supported types in the CPU language
@@ -181,6 +188,9 @@ pub enum Statement<'m> {
         body: Vec<Statement<'m>>,
     },
 
+    Break,
+    Continue,
+
     // Variable declaration with optional initialization
     Declare {
         variable: Rc<Variable>,
@@ -275,7 +285,14 @@ pub enum Expression<'m> {
         count: usize,
     },
 
+    ArrayLiteral(Vec<Expression<'m>>),
+
     TupleInit(Vec<Expression<'m>>),
+
+    Construct {
+        t: Type,
+        args: Vec<(&'static str, Expression<'m>)>,
+    },
 
     // Raw inline Rust code
     InlineRust(String),
@@ -367,6 +384,7 @@ impl<'m> RCL<'m> {
             structs: Vec::new(),
             main_functions: Vec::new(),
             import_statements: Vec::new(),
+            constants: Vec::new(),
         }
     }
 

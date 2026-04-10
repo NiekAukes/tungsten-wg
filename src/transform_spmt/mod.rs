@@ -1,6 +1,6 @@
 use crate::{
     parse::model::{Density, DensitySource, DensityType, NoiseGeneratorSettings, NoiseSettings},
-    spmt::model::{DensityFunctionRef, Expression, SPMT, Var, Variable, VariableType},
+    spmt::model::{DensityFunctionRef, Expression, Name, SPMT, Var, Variable, VariableType},
     transform_spmt::density::{DensityBuilder, NormalNoiseKey},
 };
 
@@ -14,13 +14,23 @@ fn lit(v: f64) -> Expression<'static> {
 
 pub fn newvar<'m>(arena: &'m bumpalo::Bump, name: &str, t: VariableType) -> Var<'m> {
     Var::new(arena.alloc(Variable {
-        name: Some(name.into()),
+        name: Name::Named(name.into()),
+        t,
+    }))
+}
+
+pub fn prefixvar<'m>(arena: &'m bumpalo::Bump, prefix: &str, t: VariableType) -> Var<'m> {
+    Var::new(arena.alloc(Variable {
+        name: Name::Prefixed(prefix.into()),
         t,
     }))
 }
 
 pub fn anonvar<'m>(arena: &'m bumpalo::Bump, t: VariableType) -> Var<'m> {
-    Var::new(arena.alloc(Variable { name: None, t }))
+    Var::new(arena.alloc(Variable {
+        name: Name::Anonymous,
+        t,
+    }))
 }
 
 type DensityFunctionCache<'a, 'm> = std::collections::HashMap<Density<'a>, DensityFunctionRef<'m>>;
@@ -102,6 +112,7 @@ impl<'a, 'm> Transformer<'a, 'm> {
                     }
 
                     let density_function = self.lower_density_function(density);
+
                     //self.final_model.density_functions.push(density_function);
                     self.final_model
                         .main_density_functions
@@ -160,6 +171,7 @@ impl<'a, 'm> Transformer<'a, 'm> {
         // build the density function
         let (density_function, helpers, mut bs) = builder.finish(r);
         self.final_model.functions.extend(helpers);
+
         let density_function: DensityFunctionRef<'m> =
             DensityFunctionRef::new(self.arena.alloc(density_function));
         let _a = density_function.canonical_name.as_ref().unwrap();

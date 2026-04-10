@@ -52,6 +52,19 @@ struct PerlinNoiseGenerator {
     origin_z: f32,
 }
 
+// Decision tree node for spline evaluation
+struct DecisionTreeNode {
+    next_coord: u32,
+    next_decision_index: u32,
+    location: f32,
+}
+
+// Spline value with derivative for hermite interpolation
+struct SplineValue {
+    value: f32,
+    derivative: f32,
+}
+
 // Perlin noise. Matches Minecraft's ImprovedNoise / sample_perlin_section with fade_y == yf.
 // Signature matches what the SPMT code generator emits:
 //   fn perlin(pos: vec3<f32>, perm: array<i32, 256>) -> f32
@@ -232,7 +245,7 @@ fn zfract4_(pos_z: u32) -> f32 { return f32(pos_z & 3u) * 0.25; }
 
 // Fractional position within a 4×16×4 grid cell.
 // Matches yfract16 in mathf64.rs.
-fn yfract16(pos_y: u32) -> f32 { return f32(pos_y & 15u) * 0.0625; }
+fn yfract16_(pos_y: u32) -> f32 { return f32(pos_y & 15u) * 0.0625; }
 
 // Trilinear interpolation over a 4×8×4 density grid.
 // The caller is responsible for fetching the 8 surrounding corner values
@@ -363,6 +376,7 @@ fn cornerx4y16z4_16(pos: vec3<u32>, sx: u32, sy: u32) -> u32 {
 
 fn xfract4(pos: vec3<u32>) -> f32 { return xfract4_(pos.x); }
 fn yfract8(pos: vec3<u32>) -> f32 { return yfract8_(pos.y); }
+fn yfract16(pos: vec3<u32>) -> f32 { return yfract16_(pos.y); }
 fn zfract4(pos: vec3<u32>) -> f32 { return zfract4_(pos.z); }
 
 // ==========================================

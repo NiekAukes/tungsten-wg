@@ -10,8 +10,8 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use naga::{
-    Binding, BuiltIn, Expression, Function, FunctionArgument, FunctionResult, GlobalVariable,
-    Handle, LocalVariable, MemoryDecorations, ResourceBinding, Span, StorageAccess,
+    Binding, BuiltIn, Constant, Expression, Function, FunctionArgument, FunctionResult,
+    GlobalVariable, Handle, LocalVariable, MemoryDecorations, ResourceBinding, Span, StorageAccess,
 };
 
 use super::expression::ExprContext;
@@ -58,12 +58,12 @@ pub fn convert_function<'a, 'm, 'b>(
 
     // Add parameters as function arguments
     for (i, param) in spmt_func.parameters.iter().enumerate() {
-        let param_ty = type_cache.convert_type(&param.t);
-        let param_name = param
-            .name
-            .as_deref()
-            .map(sanitize_name)
-            .unwrap_or_else(|| format!("param{}", i));
+        let param_ty = type_cache.convert_type_full(
+            &mut module.borrow_mut(),
+            converter.extern_converter,
+            &param.t,
+        );
+        let param_name = sanitize_name(&converter.get_concrete_name(*param));
 
         naga_func.arguments.push(FunctionArgument {
             name: Some(param_name),
@@ -83,10 +83,14 @@ pub fn convert_function<'a, 'm, 'b>(
 
     // Register local variables
     for var in &spmt_func.variables {
-        let var_ty = type_cache.convert_type(&var.t);
+        let var_ty = type_cache.convert_type_full(
+            &mut module.borrow_mut(),
+            converter.extern_converter,
+            &var.t,
+        );
         let local_handle = naga_func.local_variables.append(
             LocalVariable {
-                name: var.name.as_deref().map(sanitize_name),
+                name: Some(sanitize_name(&converter.get_concrete_name(*var))),
                 ty: var_ty,
                 init: None,
             },
@@ -155,24 +159,17 @@ pub fn convert_density_function<'a, 'b>(
     });
     let pos3_idx = converter.register_positional_arg();
 
-    // arg 1: origin: vec3<f32/f64>
-    // naga_func.arguments.push(FunctionArgument {
-    //     name: Some("origin".into()),
-    //     ty: type_cache.vec3f_ty,
-    //     binding: None,
-    // });
-    //let origin_idx = converter.register_positional_arg();
-
-    //@group(0) @binding(2)
-    let origin_handle = module.borrow_mut().global_variables.append(
+    // Create DensityParams uniform struct at binding 0
+    // Contains: origin, dimensions, origin_scale, position_scale
+    let params_handle = module.borrow_mut().global_variables.append(
         naga::GlobalVariable {
-            name: Some("origin".into()),
+            name: Some("params".into()),
             space: naga::AddressSpace::Uniform,
             binding: Some(ResourceBinding {
                 group: 0,
                 binding: 0,
             }),
-            ty: type_cache.vec3f_ty,
+            ty: type_cache.density_params_ty,
             init: None,
             memory_decorations: MemoryDecorations::default(),
         },
@@ -181,23 +178,7 @@ pub fn convert_density_function<'a, 'b>(
 
     let output_handle = make_output_buffer(module.clone(), type_cache, 1);
 
-    // make the dimensions uniform as well
-    let dimensions_handle = module.borrow_mut().global_variables.append(
-        naga::GlobalVariable {
-            name: Some("dimensions".into()),
-            space: naga::AddressSpace::Uniform,
-            binding: Some(ResourceBinding {
-                group: 0,
-                binding: 2,
-            }),
-            ty: type_cache.vec3u_ty,
-            init: None,
-            memory_decorations: MemoryDecorations::default(),
-        },
-        Span::UNDEFINED,
-    );
-
-    let mut bind_counter = 3; // Start after origin/output/dimensions
+    let mut bind_counter = 2; // Start after params/output
 
     // === Pack density inputs into a single storage binding ===
     if !spmt_df.density_inputs.is_empty() {
@@ -331,13 +312,22 @@ pub fn convert_density_function<'a, 'b>(
             name: "pos3".into(),
         });
 
-        let origin_expr = naga_func
+        // Load params struct pointer
+        let params_ptr = naga_func
             .expressions
-            .append(Expression::GlobalVariable(origin_handle), Span::UNDEFINED);
+            .append(Expression::GlobalVariable(params_handle), Span::UNDEFINED);
 
+        // Access and load origin (member index 0)
+        let origin_ptr = naga_func.expressions.append(
+            Expression::AccessIndex {
+                base: params_ptr,
+                index: 0,
+            },
+            Span::UNDEFINED,
+        );
         let origin_load = naga_func.expressions.append(
             Expression::Load {
-                pointer: origin_expr,
+                pointer: origin_ptr,
             },
             Span::UNDEFINED,
         );
@@ -349,6 +339,63 @@ pub fn convert_density_function<'a, 'b>(
         );
         converter.value_vars.insert(InputKey::NamedVar {
             name: "origin".into(),
+        });
+
+        // Access and load dimensions (member index 1) - not currently used in var_map but available
+        // let dimensions_ptr = naga_func.expressions.append(
+        //     Expression::AccessIndex {
+        //         base: params_ptr,
+        //         index: 1,
+        //     },
+        //     Span::UNDEFINED,
+        // );
+
+        // Access and load origin_scale (member index 2)
+        let origin_scale_ptr = naga_func.expressions.append(
+            Expression::AccessIndex {
+                base: params_ptr,
+                index: 2,
+            },
+            Span::UNDEFINED,
+        );
+        let origin_scale_load = naga_func.expressions.append(
+            Expression::Load {
+                pointer: origin_scale_ptr,
+            },
+            Span::UNDEFINED,
+        );
+        converter.var_map.insert(
+            InputKey::NamedVar {
+                name: "origin_scale".into(),
+            },
+            origin_scale_load,
+        );
+        converter.value_vars.insert(InputKey::NamedVar {
+            name: "origin_scale".into(),
+        });
+
+        // Access and load position_scale (member index 3)
+        let position_scale_ptr = naga_func.expressions.append(
+            Expression::AccessIndex {
+                base: params_ptr,
+                index: 3,
+            },
+            Span::UNDEFINED,
+        );
+        let position_scale_load = naga_func.expressions.append(
+            Expression::Load {
+                pointer: position_scale_ptr,
+            },
+            Span::UNDEFINED,
+        );
+        converter.var_map.insert(
+            InputKey::NamedVar {
+                name: "position_scale".into(),
+            },
+            position_scale_load,
+        );
+        converter.value_vars.insert(InputKey::NamedVar {
+            name: "position_scale".into(),
         });
     }
 
@@ -371,15 +418,46 @@ pub fn convert_density_function<'a, 'b>(
         }
     }
 
+    // === Convert constants ===
+
+    for (var, value) in &spmt_df.constants {
+        let mut ctx = ExprContext::new_constant_context(module.clone(), type_cache, &mut converter);
+        let const_ty = type_cache.convert_type_full(
+            &mut module.borrow_mut(),
+            ctx.converter.extern_converter,
+            &var.t,
+        );
+        let init = ctx.convert_expression(value);
+
+        let local_handle = module.borrow_mut().constants.append(
+            Constant {
+                name: Some(sanitize_name(&converter.get_concrete_name(*var))),
+                ty: const_ty,
+                init: init,
+            },
+            Span::UNDEFINED,
+        );
+
+        let const_load = naga_func
+            .expressions
+            .append(Expression::Constant(local_handle), Span::UNDEFINED);
+        converter.var_map.insert(InputKey::from(*var), const_load);
+        converter.value_vars.insert(InputKey::from(*var));
+    }
+
     // === Register local variables (skip pos3 and origin, already mapped above) ===
     for var in &spmt_df.variables {
         if converter.var_map.contains_key(&InputKey::from(*var)) {
             continue; // already registered as function argument
         }
-        let var_ty = type_cache.convert_type(&var.t);
+        let var_ty = type_cache.convert_type_full(
+            &mut module.borrow_mut(),
+            converter.extern_converter,
+            &var.t,
+        );
         let local_handle = naga_func.local_variables.append(
             LocalVariable {
-                name: var.name.as_deref().map(sanitize_name),
+                name: Some(sanitize_name(&converter.get_concrete_name(*var))),
                 ty: var_ty,
                 init: None,
             },
@@ -394,19 +472,28 @@ pub fn convert_density_function<'a, 'b>(
     // === Convert body statements ===
     {
         let mut ctx = ExprContext::new(&mut naga_func, module.clone(), type_cache, &mut converter);
+
         for stmt in &spmt_df.body {
             if matches!(stmt, spmt::Statement::Return(_)) {
                 statement::convert_density_return_statement(
                     stmt,
                     output_handle,
                     pos3_idx,
-                    dimensions_handle,
+                    params_handle,
                     &mut ctx,
                 );
             } else {
                 statement::convert_statement(stmt, &mut ctx);
             }
         }
+
+        // statement::convert_density_return_statement(
+        //     &spmt::Statement::Return(spmt::Expression::Float(1.0)),
+        //     output_handle,
+        //     pos3_idx,
+        //     params_handle,
+        //     &mut ctx,
+        // );
     }
 
     module.borrow_mut().entry_points.push(naga::EntryPoint {

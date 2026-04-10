@@ -73,10 +73,9 @@ impl<'m> From<&DensityInput<'m>> for InputKey {
 
 impl<'m> From<spmt::Var<'m>> for InputKey {
     fn from(var: spmt::Var<'m>) -> Self {
-        if let Some(name) = &var.name {
-            InputKey::NamedVar { name: name.clone() }
-        } else {
-            InputKey::UnnamedVar { key: var.addr() }
+        match &var.name {
+            spmt::Name::Named(name) => InputKey::NamedVar { name: name.clone() },
+            _ => InputKey::UnnamedVar { key: var.addr() },
         }
     }
 }
@@ -123,6 +122,10 @@ pub struct NagaFunctionConverter<'m> {
     pub extern_converter: &'m ExternFunctionConverter<'m>,
     /// Total number of arguments registered for the current function.
     arg_count: u32,
+    /// Cache for concrete variable names (used for anonymous variables).
+    name_cache: HashMap<*const (), String>,
+    /// Counter for generating unique anonymous variable names.
+    anon_counter: usize,
 }
 
 const HELPER_MODULE_WGSL: &str = include_str!("helpers/helpers.wgsl");
@@ -142,6 +145,8 @@ impl<'a> NagaFunctionConverter<'a> {
             already_converted_functions: already_converted,
             arg_count: 0,
             extern_converter,
+            name_cache: HashMap::new(),
+            anon_counter: 0,
         }
     }
 
@@ -155,6 +160,8 @@ impl<'a> NagaFunctionConverter<'a> {
             already_converted_functions: self.already_converted_functions.clone(),
             arg_count: 0,
             extern_converter: self.extern_converter,
+            name_cache: self.name_cache.clone(),
+            anon_counter: self.anon_counter,
         }
     }
 
@@ -220,6 +227,38 @@ impl<'a> NagaFunctionConverter<'a> {
         self.function_counter += 1;
         name
     }
+
+    /// Get a concrete name for a variable, handling Anonymous, Prefixed, and Named cases.
+    /// This is similar to the ConcreteName trait in pretty.rs but doesn't require a Printer.
+    pub fn get_concrete_name(&mut self, var: spmt::Var<'_>) -> String {
+        use crate::spmt::model::Name;
+
+        match &var.name {
+            Name::Anonymous => {
+                // Check cache first
+                if let Some(name) = self.name_cache.get(&var.addr()) {
+                    return name.clone();
+                }
+                // Generate new anonymous name
+                let name = format!("var_{}", self.anon_counter);
+                self.anon_counter += 1;
+                self.name_cache.insert(var.addr(), name.clone());
+                name
+            }
+            Name::Prefixed(prefix) => {
+                // Check cache first
+                if let Some(name) = self.name_cache.get(&var.addr()) {
+                    return name.clone();
+                }
+                // Generate new prefixed name
+                let name = format!("{}_{}", prefix, self.anon_counter);
+                self.anon_counter += 1;
+                self.name_cache.insert(var.addr(), name.clone());
+                name
+            }
+            Name::Named(name) => name.clone(),
+        }
+    }
 }
 
 /// Convert an entire SPMT program to separate Naga modules.
@@ -235,29 +274,45 @@ pub fn convert_spmt_to_naga(
     let mut results = Vec::new();
 
     for (i, density_function) in program.density_functions.iter().enumerate() {
-        let module = Rc::new(RefCell::new(naga::Module::default()));
-
-        let mut extern_converter = ExternFunctionConverter::new(&helpers);
-        let type_cache =
-            types::TypeCache::register(module.borrow_mut(), precision, &mut extern_converter);
-
-        let mut already_converted: HashMap<*const (), Handle<Function>> = HashMap::new();
-
-        function::convert_density_function(
-            density_function,
-            module.clone(),
-            &type_cache,
-            &mut already_converted,
-            &extern_converter,
-        );
-
         let name = density_function
             .canonical_name
             .as_deref()
             .map(types::sanitize_name)
             .unwrap_or_else(|| format!("density_{}", i));
 
-        results.push((name, module));
+        // Try to convert the density function, but skip it if it uses unsupported features
+        let conversion_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let module = Rc::new(RefCell::new(naga::Module::default()));
+
+            let mut extern_converter = ExternFunctionConverter::new(&helpers);
+            let type_cache =
+                types::TypeCache::register(module.borrow_mut(), precision, &mut extern_converter);
+
+            let mut already_converted: HashMap<*const (), Handle<Function>> = HashMap::new();
+
+            function::convert_density_function(
+                density_function,
+                module.clone(),
+                &type_cache,
+                &mut already_converted,
+                &extern_converter,
+            );
+
+            (name.clone(), module)
+        }));
+
+        match conversion_result {
+            Ok((name, module)) => {
+                results.push((name, module));
+            }
+            Err(_) => {
+                eprintln!(
+                    "Warning: Skipping density function '{}' - it uses features not supported in WGSL/naga transformation (e.g., Extern types, complex arrays). \
+                     These functions work with RCL transformation.",
+                    name
+                );
+            }
+        }
     }
 
     results

@@ -42,11 +42,14 @@ pub struct TypeCache {
     pub i32_ty: Handle<Type>,
     pub u32_ty: Handle<Type>,
     pub i64_ty: Handle<Type>,
+    pub bool_ty: Handle<Type>,
     pub vec3f_ty: Handle<Type>,
     pub vec3i_ty: Handle<Type>,
     pub vec3u_ty: Handle<Type>,
     pub perm_array_ty: Handle<Type>,
     pub perm_table_ty: Handle<Type>,
+    /// Combined uniform struct for origin, dimensions, origin_scale, position_scale
+    pub density_params_ty: Handle<Type>,
 }
 
 impl TypeCache {
@@ -130,6 +133,14 @@ impl TypeCache {
             naga::Span::UNDEFINED,
         );
 
+        let bool_ty = types.insert(
+            Type {
+                name: None,
+                inner: TypeInner::Scalar(Scalar::BOOL),
+            },
+            naga::Span::UNDEFINED,
+        );
+
         // Raw permutation data: arrays of 256 i32 values.
         let perm_array_ty = types.insert(
             Type {
@@ -160,17 +171,59 @@ impl TypeCache {
             naga::Span::UNDEFINED,
         );
 
+        // Create DensityParams struct combining origin, dimensions, origin_scale, position_scale
+        // Layout (std140): vec3<f32> origin (16 bytes), vec3<u32> dimensions (16 bytes), 
+        //                  vec3<f32> origin_scale (16 bytes), vec3<f32> position_scale (16 bytes)
+        // Total: 64 bytes
+        let density_params_ty = types.insert(
+            Type {
+                name: Some("DensityParams".into()),
+                inner: TypeInner::Struct {
+                    members: vec![
+                        naga::StructMember {
+                            name: Some("origin".into()),
+                            ty: vec3f_ty,
+                            binding: None,
+                            offset: 0,
+                        },
+                        naga::StructMember {
+                            name: Some("dimensions".into()),
+                            ty: vec3u_ty,
+                            binding: None,
+                            offset: 16,
+                        },
+                        naga::StructMember {
+                            name: Some("origin_scale".into()),
+                            ty: vec3f_ty,
+                            binding: None,
+                            offset: 32,
+                        },
+                        naga::StructMember {
+                            name: Some("position_scale".into()),
+                            ty: vec3f_ty,
+                            binding: None,
+                            offset: 48,
+                        },
+                    ],
+                    span: 64,
+                },
+            },
+            naga::Span::UNDEFINED,
+        );
+
         TypeCache {
             float_ty,
             i32_ty,
             u32_ty,
             i64_ty,
+            bool_ty,
             vec3f_ty,
             vec3i_ty,
             vec3u_ty,
             perm_array_ty,
             perm_table_ty,
             output_ty,
+            density_params_ty,
         }
     }
 
@@ -184,6 +237,78 @@ impl TypeCache {
             spmt::VariableType::I32 => self.u32_ty,
             spmt::VariableType::I64 => self.i64_ty,
             spmt::VariableType::PermutationTable => self.perm_table_ty,
+            spmt::VariableType::Extern(_name) => {
+                // Extern types require the extern_converter - use convert_type_full instead
+                panic!("Extern types require extern_converter. Use convert_type_full instead.")
+            }
+            spmt::VariableType::Array(_element_type, _size) => {
+                // Array types require module access - use convert_type_full instead
+                panic!("Array types require module access. Use convert_type_full instead.")
+            }
+            spmt::VariableType::Bool => self.bool_ty,
+        }
+    }
+
+    /// Convert an SPMT variable type to a Naga type handle, with full support for all types.
+    /// This handles Extern types via the extern_converter and arrays with any element type.
+    pub fn convert_type_full<'a>(
+        &self,
+        module: &'a mut std::cell::RefMut<'_, naga::Module>,
+        extern_converter: &crate::transform_naga::extern_functions::ExternFunctionConverter<'_>,
+        t: &spmt::VariableType,
+    ) -> Handle<Type> {
+        match t {
+            spmt::VariableType::Extern(name) => {
+                // Use extern_converter to embed the struct from helpers.wgsl
+                extern_converter.embed_wgsl_struct(module, name)
+            }
+            spmt::VariableType::Array(element_type_name, size) => {
+                // First, get or create the element type
+                let element_ty = self.get_or_create_element_type(module, extern_converter, element_type_name);
+                
+                // Calculate stride based on element type
+                let stride = match module.types[element_ty].inner {
+                    TypeInner::Scalar(s) => s.width as u32,
+                    TypeInner::Vector { scalar, size } => scalar.width as u32 * size as u32,
+                    TypeInner::Struct { span, .. } => span,
+                    _ => 0, // Let naga compute the stride
+                };
+                
+                // Create the array type
+                module.types.insert(
+                    Type {
+                        name: None,
+                        inner: TypeInner::Array {
+                            base: element_ty,
+                            size: naga::ArraySize::Constant(
+                                core::num::NonZeroU32::new(*size as u32)
+                                    .expect("array length must be > 0"),
+                            ),
+                            stride,
+                        },
+                    },
+                    naga::Span::UNDEFINED,
+                )
+            }
+            // For simple types, use the basic convert_type
+            _ => self.convert_type(t),
+        }
+    }
+
+    /// Get or create a type handle for an element type (by name string).
+    fn get_or_create_element_type<'a>(
+        &self,
+        module: &'a mut std::cell::RefMut<'_, naga::Module>,
+        extern_converter: &crate::transform_naga::extern_functions::ExternFunctionConverter<'_>,
+        element_type_name: &str,
+    ) -> Handle<Type> {
+        match element_type_name {
+            "f32" | "f64" => self.float_ty,
+            "i32" => self.u32_ty,
+            "i64" => self.i64_ty,
+            "bool" => self.bool_ty,
+            // For other types (structs like DecisionTreeNode, SplineValue), use extern_converter
+            name => extern_converter.embed_wgsl_struct(module, name),
         }
     }
 
@@ -210,6 +335,7 @@ impl TypeCache {
             naga::Span::UNDEFINED,
         )
     }
+
 }
 
 /// Convert an SPMT binary operator to a Naga binary operator.

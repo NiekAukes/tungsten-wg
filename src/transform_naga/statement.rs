@@ -23,13 +23,16 @@ pub fn convert_statement<'a>(stmt: &spmt::Statement<'a>, ctx: &mut ExprContext<'
                 existing
             } else {
                 // Variable not yet registered — create a local variable for it.
-                let naga_ty = ctx.type_cache.convert_type(&target.t);
-                let local_handle = ctx.func.local_variables.append(
+                let naga_ty = ctx.type_cache.convert_type_full(
+                    &mut ctx.module.borrow_mut(),
+                    ctx.converter.extern_converter,
+                    &target.t,
+                );
+                let local_handle = ctx.func.as_mut().unwrap().local_variables.append(
                     naga::LocalVariable {
-                        name: target
-                            .name
-                            .as_deref()
-                            .map(|n| super::types::sanitize_name(n)),
+                        name: Some(super::types::sanitize_name(
+                            &ctx.converter.get_concrete_name(*target)
+                        )),
                         ty: naga_ty,
                         init: None,
                     },
@@ -37,13 +40,15 @@ pub fn convert_statement<'a>(stmt: &spmt::Statement<'a>, ctx: &mut ExprContext<'
                 );
                 let ptr_expr = ctx
                     .func
+                    .as_mut()
+                    .unwrap()
                     .expressions
                     .append(Expression::LocalVariable(local_handle), Span::UNDEFINED);
                 ctx.converter.var_map.insert(key, ptr_expr);
                 ptr_expr
             };
 
-            ctx.func.body.push(
+            ctx.func.as_mut().unwrap().body.push(
                 Statement::Store {
                     pointer: ptr,
                     value: value_h,
@@ -54,7 +59,7 @@ pub fn convert_statement<'a>(stmt: &spmt::Statement<'a>, ctx: &mut ExprContext<'
 
         spmt::Statement::Return(expr) => {
             let value_h = ctx.convert_expression(expr);
-            ctx.func.body.push(
+            ctx.func.as_mut().unwrap().body.push(
                 Statement::Return {
                     value: Some(value_h),
                 },
@@ -72,20 +77,20 @@ pub fn convert_statement<'a>(stmt: &spmt::Statement<'a>, ctx: &mut ExprContext<'
             // Build accept block
             // We need to temporarily swap out the body to build sub-blocks,
             // then swap back. This is the standard pattern for building nested blocks in naga.
-            let saved_body = std::mem::replace(&mut ctx.func.body, Block::new());
+            let saved_body = std::mem::replace(&mut ctx.func.as_mut().unwrap().body, Block::new());
 
             for s in then_branch {
                 convert_statement(s, ctx);
             }
-            let accept = std::mem::replace(&mut ctx.func.body, Block::new());
+            let accept = std::mem::replace(&mut ctx.func.as_mut().unwrap().body, Block::new());
 
             // Build reject block
             for s in else_branch {
                 convert_statement(s, ctx);
             }
-            let reject = std::mem::replace(&mut ctx.func.body, saved_body);
+            let reject = std::mem::replace(&mut ctx.func.as_mut().unwrap().body, saved_body);
 
-            ctx.func.body.push(
+            ctx.func.as_mut().unwrap().body.push(
                 Statement::If {
                     condition: cond_h,
                     accept,
@@ -102,27 +107,29 @@ pub fn convert_statement<'a>(stmt: &spmt::Statement<'a>, ctx: &mut ExprContext<'
             //     if (!cond) { break; }
             //     body...
             //   }
-            let saved_body = std::mem::replace(&mut ctx.func.body, Block::new());
+            let saved_body = std::mem::replace(&mut ctx.func.as_mut().unwrap().body, Block::new());
 
             // Evaluate condition and negate it for the break check
             let cond_h = ctx.convert_expression(condition);
-            let old_len = ctx.func.expressions.len();
-            let not_cond = ctx.func.expressions.append(
+            let old_len = ctx.func.as_mut().unwrap().expressions.len();
+            let not_cond = ctx.func.as_mut().unwrap().expressions.append(
                 Expression::Unary {
                     op: naga::UnaryOperator::LogicalNot,
                     expr: cond_h,
                 },
                 Span::UNDEFINED,
             );
-            let not_cond_range = ctx.func.expressions.range_from(old_len);
+            let not_cond_range = ctx.func.as_mut().unwrap().expressions.range_from(old_len);
             ctx.func
+                .as_mut()
+                .unwrap()
                 .body
                 .push(Statement::Emit(not_cond_range), Span::UNDEFINED);
 
             // if (!cond) { break; }
             let mut break_block = Block::new();
             break_block.push(Statement::Break, Span::UNDEFINED);
-            ctx.func.body.push(
+            ctx.func.as_mut().unwrap().body.push(
                 Statement::If {
                     condition: not_cond,
                     accept: break_block,
@@ -136,9 +143,9 @@ pub fn convert_statement<'a>(stmt: &spmt::Statement<'a>, ctx: &mut ExprContext<'
                 convert_statement(s, ctx);
             }
 
-            let loop_body = std::mem::replace(&mut ctx.func.body, saved_body);
+            let loop_body = std::mem::replace(&mut ctx.func.as_mut().unwrap().body, saved_body);
 
-            ctx.func.body.push(
+            ctx.func.as_mut().unwrap().body.push(
                 Statement::Loop {
                     body: loop_body,
                     continuing: Block::new(),
@@ -147,14 +154,119 @@ pub fn convert_statement<'a>(stmt: &spmt::Statement<'a>, ctx: &mut ExprContext<'
                 Span::UNDEFINED,
             );
         }
+        spmt::Statement::Repeat { count, body } => {
+            // Lower `repeat N { ... }` to a counted loop:
+            //   let counter = 0u;
+            //   loop {
+            //     if (counter >= N) { break; }
+            //     body...
+            //     counter = counter + 1;
+            //   }
+            let saved_body = std::mem::replace(&mut ctx.func.as_mut().unwrap().body, Block::new());
+            let counter_var = naga::LocalVariable {
+                name: Some("repeat_counter".to_string()),
+                ty: ctx.type_cache.u32_ty,
+                init: Some(
+                    ctx.func
+                        .as_mut()
+                        .unwrap()
+                        .expressions
+                        .append(Expression::Literal(naga::Literal::U32(0)), Span::UNDEFINED),
+                ),
+            };
+            let counter_var = ctx
+                .func
+                .as_mut()
+                .unwrap()
+                .local_variables
+                .append(counter_var, Span::UNDEFINED);
+            let counter_ptr = ctx
+                .func
+                .as_mut()
+                .unwrap()
+                .expressions
+                .append(Expression::LocalVariable(counter_var), Span::UNDEFINED);
+
+            let count_expr = ctx.func.as_mut().unwrap().expressions.append(
+                Expression::Literal(naga::Literal::U32(*count as u32)),
+                Span::UNDEFINED,
+            );
+
+            // if (counter >= count) { break; }
+            let mut break_block = Block::new();
+            break_block.push(Statement::Break, Span::UNDEFINED);
+            let cond_expr = Expression::Binary {
+                op: naga::BinaryOperator::GreaterEqual,
+                left: ctx.append_and_emit(Expression::Load {
+                    pointer: counter_ptr,
+                }),
+                right: count_expr,
+            };
+
+            let cond_expr = ctx
+                .func
+                .as_mut()
+                .unwrap()
+                .expressions
+                .append(cond_expr, Span::UNDEFINED);
+
+            ctx.func.as_mut().unwrap().body.push(
+                Statement::If {
+                    condition: cond_expr,
+                    accept: break_block,
+                    reject: Block::new(),
+                },
+                Span::UNDEFINED,
+            );
+
+            for s in body {
+                convert_statement(s, ctx);
+            }
+
+            let counter_value = ctx.append_and_emit(Expression::Load {
+                pointer: counter_ptr,
+            });
+            let one_expr = ctx.append_and_emit(Expression::Literal(naga::Literal::U32(1)));
+            let increment_expr = ctx.append_and_emit(Expression::Binary {
+                op: naga::BinaryOperator::Add,
+                left: counter_value,
+                right: one_expr,
+            });
+
+            ctx.func.as_mut().unwrap().body.push(
+                Statement::Store {
+                    pointer: counter_ptr,
+                    value: increment_expr,
+                },
+                Span::UNDEFINED,
+            );
+
+            let loop_body = std::mem::replace(&mut ctx.func.as_mut().unwrap().body, saved_body);
+
+            ctx.func.as_mut().unwrap().body.push(
+                Statement::Loop {
+                    body: loop_body,
+                    continuing: Block::new(),
+                    break_if: None,
+                },
+                Span::UNDEFINED,
+            );
+        }
+        spmt::Statement::Break => {
+            ctx.func
+                .as_mut()
+                .unwrap()
+                .body
+                .push(Statement::Break, Span::UNDEFINED);
+        }
     }
 }
 
 pub fn convert_density_return_statement<'a>(
     stmt: &spmt::Statement<'a>,
     output_handle: Handle<GlobalVariable>,
-    pos3_idx: u32,
-    dimensions_handle: Handle<GlobalVariable>,
+    _pos3_idx: u32,
+    params_handle: Handle<GlobalVariable>,
     ctx: &mut ExprContext<'_, 'a, '_>,
 ) {
     // output[gid] = value;
@@ -165,17 +277,16 @@ pub fn convert_density_return_statement<'a>(
 
     // Get the global variable handle for the output buffer
 
-    let pos3 = ctx
-        .func
-        .expressions
-        .append(Expression::FunctionArgument(pos3_idx), Span::UNDEFINED);
-
-    // Compute the index expression (global invocation ID)
-    let dim_expr = ctx.func.expressions.append(
-        Expression::GlobalVariable(dimensions_handle),
+    // Access dimensions from the params struct (member index 1)
+    let params_ptr = ctx.func.as_mut().unwrap().expressions.append(
+        Expression::GlobalVariable(params_handle),
         Span::UNDEFINED,
     );
-    let dim_expr = ctx.append_and_emit(Expression::Load { pointer: dim_expr });
+    let dim_ptr = ctx.append_and_emit(Expression::AccessIndex {
+        base: params_ptr,
+        index: 1, // dimensions is at member index 1
+    });
+    let dim_expr = ctx.append_and_emit(Expression::Load { pointer: dim_ptr });
     let dim_y = ctx.append_and_emit(Expression::AccessIndex {
         base: dim_expr,
         index: 1,
@@ -196,7 +307,7 @@ pub fn convert_density_return_statement<'a>(
     });
 
     // Store the return value into output[gid]
-    ctx.func.body.push(
+    ctx.func.as_mut().unwrap().body.push(
         Statement::Store {
             pointer: ptr_expr,
             value: value_h,

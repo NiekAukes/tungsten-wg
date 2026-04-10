@@ -82,6 +82,7 @@ impl GpuOrchestrationCodegen {
         writeln!(self.code, "use crate::mathf64::Vec3;").unwrap();
         writeln!(self.code, "use crate::orchestration::PermutationTables;").unwrap();
         writeln!(self.code, "use crate::utils::PerlinNoiseSampler;").unwrap();
+        writeln!(self.code, "use wgpu::util::DeviceExt;").unwrap();
         writeln!(self.code).unwrap();
         writeln!(self.code, "const GRID_X: u32 = {};", gx).unwrap();
         writeln!(self.code, "const GRID_Y: u32 = {};", gy).unwrap();
@@ -104,7 +105,7 @@ impl GpuOrchestrationCodegen {
         .unwrap();
         writeln!(
             self.code,
-            "const UNIFORM_VEC3_SIZE: u64 = 16; // vec3 padded to 16 bytes (std140)"
+            "const DENSITY_PARAMS_SIZE: u64 = 64; // DensityParams struct: origin(16) + dimensions(16) + origin_scale(16) + position_scale(16)"
         )
         .unwrap();
         writeln!(self.code).unwrap();
@@ -132,17 +133,27 @@ impl GpuOrchestrationCodegen {
         }
         writeln!(self.code).unwrap();
 
-        // Staging + uniforms
+        // Staging buffer
         writeln!(self.code, "    buf_staging: wgpu::Buffer,").unwrap();
-        writeln!(self.code, "    buf_origin: wgpu::Buffer,").unwrap();
-        writeln!(self.code, "    buf_dimensions: wgpu::Buffer,").unwrap();
         writeln!(self.code).unwrap();
 
-        // Packed density input buffers (one per shader that has density inputs)
+        // Per-shader DensityParams uniform buffers (origin, dimensions, origin_scale, position_scale)
+        writeln!(
+            self.code,
+            "    // DensityParams uniform buffers (per shader invocation)"
+        )
+        .unwrap();
+        for s in shaders {
+            let sn = shader_dep_name(s);
+            writeln!(self.code, "    buf_{sn}_params: wgpu::Buffer,").unwrap();
+        }
+        writeln!(self.code).unwrap();
+
+        // Packed density input buffers (only for shaders with multiple density inputs)
         {
             let mut any = false;
             for s in shaders {
-                if !s.shader.inputs.is_empty() {
+                if s.shader.inputs.len() > 1 {
                     if !any {
                         writeln!(self.code, "    // Packed density-input storage buffers").unwrap();
                         any = true;
@@ -295,7 +306,9 @@ impl GpuOrchestrationCodegen {
             )
             .unwrap();
             writeln!(self.code, "            label: Some(\"{sn}_out\"),").unwrap();
-            let buf_size = dep.dimensions.flatten() * std::mem::size_of::<f32>();
+            // Storage buffers must match Naga's padded array layout (multiple of 4 f32).
+            let buf_size =
+                ensure_alignment(dep.dimensions.flatten()) as usize * std::mem::size_of::<f32>();
             writeln!(self.code, "            size: {} as u64,", buf_size).unwrap();
             writeln!(self.code, "            usage: storage_out_usage,").unwrap();
             writeln!(self.code, "            mapped_at_creation: false,").unwrap();
@@ -320,32 +333,106 @@ impl GpuOrchestrationCodegen {
         writeln!(self.code, "        }});").unwrap();
         writeln!(self.code).unwrap();
 
-        // Uniform buffers
+        // Uniform buffers - per-shader DensityParams
         writeln!(
             self.code,
             "        let uniform_usage = wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST;"
         )
         .unwrap();
-        writeln!(
-            self.code,
-            "        let buf_origin = device.create_buffer(&wgpu::BufferDescriptor {{"
-        )
-        .unwrap();
-        writeln!(self.code, "            label: Some(\"origin\"),").unwrap();
-        writeln!(self.code, "            size: UNIFORM_VEC3_SIZE,").unwrap();
-        writeln!(self.code, "            usage: uniform_usage,").unwrap();
-        writeln!(self.code, "            mapped_at_creation: false,").unwrap();
-        writeln!(self.code, "        }});").unwrap();
-        writeln!(
-            self.code,
-            "        let buf_dimensions = device.create_buffer(&wgpu::BufferDescriptor {{"
-        )
-        .unwrap();
-        writeln!(self.code, "            label: Some(\"dimensions\"),").unwrap();
-        writeln!(self.code, "            size: UNIFORM_VEC3_SIZE,").unwrap();
-        writeln!(self.code, "            usage: uniform_usage,").unwrap();
-        writeln!(self.code, "            mapped_at_creation: false,").unwrap();
-        writeln!(self.code, "        }});").unwrap();
+
+        // Per-shader params buffers (containing origin, dimensions, origin_scale, position_scale)
+        // Struct layout: origin(vec3f, 16 bytes), dimensions(vec3u, 16 bytes), origin_scale(vec3f, 16 bytes), position_scale(vec3f, 16 bytes)
+        for s in shaders {
+            let sn = shader_dep_name(s);
+            let (gx, gy, gz) = s.dimensions;
+            let (ox, oy, oz) = s.scaled_origin.as_float();
+            let (px, py, pz) = s.scaled_position.as_float();
+
+            writeln!(
+                self.code,
+                "        let buf_{sn}_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {{"
+            )
+            .unwrap();
+            writeln!(self.code, "            label: Some(\"{sn}_params\"),").unwrap();
+            // Build the DensityParams struct directly as bytes
+            // origin (vec3f + padding), dimensions (vec3u + padding), origin_scale (vec3f + padding), position_scale (vec3f + padding)
+            writeln!(self.code, "            contents: &{{").unwrap();
+            writeln!(self.code, "                let mut params = [0u8; 64];").unwrap();
+            writeln!(
+                self.code,
+                "                // origin at offset 0 (will be set at dispatch)"
+            )
+            .unwrap();
+            writeln!(
+                self.code,
+                "                // 0..16 is origin (vec3f + pad)"
+            )
+            .unwrap();
+            writeln!(
+                self.code,
+                "                // dimensions at offset 16 (vec3u + pad)"
+            )
+            .unwrap();
+            writeln!(
+                self.code,
+                "                params[16..20].copy_from_slice(&{gx}_u32.to_ne_bytes());"
+            )
+            .unwrap();
+            writeln!(
+                self.code,
+                "                params[20..24].copy_from_slice(&{gy}_u32.to_ne_bytes());"
+            )
+            .unwrap();
+            writeln!(
+                self.code,
+                "                params[24..28].copy_from_slice(&{gz}_u32.to_ne_bytes());"
+            )
+            .unwrap();
+            writeln!(
+                self.code,
+                "                // origin_scale at offset 32 (vec3f + pad)"
+            )
+            .unwrap();
+            writeln!(
+                self.code,
+                "                params[32..36].copy_from_slice(&{ox}_f32.to_ne_bytes());"
+            )
+            .unwrap();
+            writeln!(
+                self.code,
+                "                params[36..40].copy_from_slice(&{oy}_f32.to_ne_bytes());"
+            )
+            .unwrap();
+            writeln!(
+                self.code,
+                "                params[40..44].copy_from_slice(&{oz}_f32.to_ne_bytes());"
+            )
+            .unwrap();
+            writeln!(
+                self.code,
+                "                // position_scale at offset 48 (vec3f + pad)"
+            )
+            .unwrap();
+            writeln!(
+                self.code,
+                "                params[48..52].copy_from_slice(&{px}_f32.to_ne_bytes());"
+            )
+            .unwrap();
+            writeln!(
+                self.code,
+                "                params[52..56].copy_from_slice(&{py}_f32.to_ne_bytes());"
+            )
+            .unwrap();
+            writeln!(
+                self.code,
+                "                params[56..60].copy_from_slice(&{pz}_f32.to_ne_bytes());"
+            )
+            .unwrap();
+            writeln!(self.code, "                params").unwrap();
+            writeln!(self.code, "            }},").unwrap();
+            writeln!(self.code, "            usage: uniform_usage,").unwrap();
+            writeln!(self.code, "        }});").unwrap();
+        }
         writeln!(self.code).unwrap();
 
         // Packed density-input and permutation-table buffers
@@ -356,7 +443,7 @@ impl GpuOrchestrationCodegen {
         .unwrap();
 
         for s in shaders {
-            if !s.shader.inputs.is_empty() {
+            if s.shader.inputs.len() > 1 {
                 let sn = shader_dep_name(s);
                 let total_size: u64 = s
                     .shader
@@ -417,10 +504,10 @@ impl GpuOrchestrationCodegen {
             .unwrap();
             writeln!(self.code, "            entries: &[").unwrap();
 
-            // binding 0: origin (uniform)
+            // binding 0: params (DensityParams struct uniform)
             writeln!(
                 self.code,
-                "                buf_entry(0, &buf_origin, UNIFORM_VEC3_SIZE),"
+                "                buf_entry(0, &buf_{dep_name}_params, DENSITY_PARAMS_SIZE),"
             )
             .unwrap();
             // binding 1: output (storage rw)
@@ -429,17 +516,20 @@ impl GpuOrchestrationCodegen {
                 "                buf_entry_whole(1, &buf_{dep_name}_out),"
             )
             .unwrap();
-            // binding 2: dimensions (uniform)
-            writeln!(
-                self.code,
-                "                buf_entry(2, &buf_dimensions, UNIFORM_VEC3_SIZE),"
-            )
-            .unwrap();
 
-            let mut binding = 3u32;
+            let mut binding = 2u32;
 
-            // Packed density inputs buffer
-            if !s.shader.inputs.is_empty() {
+            // Density inputs: bind upstream output directly for single-input shaders,
+            // otherwise use the packed input buffer.
+            if s.shader.inputs.len() == 1 {
+                let input_sn = shader_dep_name(&s.shader.inputs[0]);
+                writeln!(
+                    self.code,
+                    "                buf_entry_whole({binding}, &buf_{input_sn}_out),"
+                )
+                .unwrap();
+                binding += 1;
+            } else if s.shader.inputs.len() > 1 {
                 writeln!(
                     self.code,
                     "                buf_entry_whole({binding}, &buf_{dep_name}_density_inputs),"
@@ -463,19 +553,6 @@ impl GpuOrchestrationCodegen {
         }
         writeln!(self.code).unwrap();
 
-        // Write constant dimensions
-        writeln!(
-            self.code,
-            "        let dims: [u32; 4] = [GRID_X, GRID_Y, GRID_Z, 0];"
-        )
-        .unwrap();
-        writeln!(
-            self.code,
-            "        queue.write_buffer(&buf_dimensions, 0, bytemuck::cast_slice(&dims));"
-        )
-        .unwrap();
-        writeln!(self.code).unwrap();
-
         // Self constructor
         writeln!(self.code, "        Self {{").unwrap();
         writeln!(self.code, "            device,").unwrap();
@@ -489,10 +566,12 @@ impl GpuOrchestrationCodegen {
             writeln!(self.code, "            buf_{sn}_out,").unwrap();
         }
         writeln!(self.code, "            buf_staging,").unwrap();
-        writeln!(self.code, "            buf_origin,").unwrap();
-        writeln!(self.code, "            buf_dimensions,").unwrap();
         for s in shaders {
-            if !s.shader.inputs.is_empty() {
+            let sn = shader_dep_name(s);
+            writeln!(self.code, "            buf_{sn}_params,").unwrap();
+        }
+        for s in shaders {
+            if s.shader.inputs.len() > 1 {
                 let sn = shader_dep_name(s);
                 writeln!(self.code, "            buf_{sn}_density_inputs,").unwrap();
             }
@@ -531,17 +610,20 @@ impl GpuOrchestrationCodegen {
         )
         .unwrap();
 
-        // Upload origin
+        // Upload origin to all shader params buffers (at offset 0 in DensityParams)
         writeln!(
             self.code,
             "        let origin_data: [f32; 4] = [origin.x as f32, origin.y as f32, origin.z as f32, 0.0];"
         )
         .unwrap();
-        writeln!(
-            self.code,
-            "        self.queue.write_buffer(&self.buf_origin, 0, bytemuck::cast_slice(&origin_data));"
-        )
-        .unwrap();
+        for s in shaders {
+            let sn = shader_dep_name(s);
+            writeln!(
+                self.code,
+                "        self.queue.write_buffer(&self.buf_{sn}_params, 0, bytemuck::cast_slice(&origin_data));"
+            )
+            .unwrap();
+        }
         writeln!(self.code).unwrap();
 
         // Upload packed permutation tables for each shader
@@ -578,10 +660,6 @@ impl GpuOrchestrationCodegen {
         writeln!(self.code, "        }});").unwrap();
         writeln!(self.code).unwrap();
 
-        // Flush staged write_buffer operations before encoder work
-        writeln!(self.code, "        self.queue.submit(std::iter::empty());").unwrap();
-        writeln!(self.code).unwrap();
-
         // Dispatch waves
         for (wave_idx, wave) in waves.iter().enumerate() {
             writeln!(
@@ -596,7 +674,7 @@ impl GpuOrchestrationCodegen {
 
             // Copy dependency outputs → packed density_inputs buffers
             for dep in wave {
-                if !dep.shader.inputs.is_empty() {
+                if dep.shader.inputs.len() > 1 {
                     let dep_name = shader_dep_name(dep);
                     let mut offset = 0u64;
                     for input_dep in &dep.shader.inputs {
@@ -684,18 +762,17 @@ impl GpuOrchestrationCodegen {
         .unwrap();
         writeln!(self.code, "            sender.send(result).unwrap();").unwrap();
         writeln!(self.code, "        }});").unwrap();
-        writeln!(self.code, "        loop {{").unwrap();
         writeln!(
             self.code,
-            "            self.device.poll(wgpu::PollType::Poll).unwrap();"
+            "        self.device.poll(wgpu::PollType::Wait).unwrap();"
         )
         .unwrap();
         writeln!(
             self.code,
-            "            if let Ok(r) = receiver.try_recv() {{ r.unwrap(); break; }}"
+            "        let map_result = receiver.recv().unwrap();"
         )
         .unwrap();
-        writeln!(self.code, "        }}").unwrap();
+        writeln!(self.code, "        map_result.unwrap();").unwrap();
         writeln!(self.code).unwrap();
         writeln!(
             self.code,

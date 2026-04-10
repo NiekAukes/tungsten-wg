@@ -9,6 +9,7 @@ use std::rc::Rc;
 use super::{RCLFunctionConverter, sanitize_name, types};
 use crate::rcl::{Parameter, model as rcl};
 use crate::spmt::model::{self as spmt, Addr, Interned};
+use crate::spmt::try_derive_type;
 use crate::transform_rcl::types::{convert_type, permutation_table_var_name};
 use crate::transform_rcl::{InputKey, function};
 
@@ -26,17 +27,27 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
             spmt::Expression::Int(val) => rcl::Expression::I32Literal(*val),
             spmt::Expression::Long(val) => rcl::Expression::I64Literal(*val),
             spmt::Expression::BinaryOp { op, left, right } => {
-                let left = Box::new(self.convert_expression(left));
-                let right = Box::new(self.convert_expression(right));
+                // let left = Box::new(self.convert_expression(left));
+                // let right = Box::new(self.convert_expression(right));
+                let (left, right) = self.try_convert_arguments_binary_op(left, right, op);
                 let op = types::convert_binary_op(*op);
-                rcl::Expression::BinaryOp { op, left, right }
+                rcl::Expression::BinaryOp {
+                    op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                }
             }
             spmt::Expression::UnaryOp { op, operand } => {
                 let operand = Box::new(self.convert_expression(operand));
                 let op = types::convert_unary_op(*op);
                 rcl::Expression::UnaryOp { op, operand }
             }
-            spmt::Expression::Field { base, field } => {
+            spmt::Expression::Field {
+                base,
+                field,
+                type_of_field: _,
+                known_idnex: _,
+            } => {
                 let base = Box::new(self.convert_expression(base));
                 rcl::Expression::Field {
                     base,
@@ -53,16 +64,19 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
                         func.clone()
                     } else {
                         // not converted yet, convert the function and store it in the map
-                        let (rcl_func, converter) = function::convert_function(
+                        let (rcl_func, converter, is_new) = function::convert_function(
                             function,
                             self.arena,
                             self.already_converted_functions.clone(),
                             self.density_function_inputs.clone(),
+                            self.density_func_name.clone(),
                         );
-                        self.already_converted_functions
-                            .insert(function.addr(), rcl_func.clone());
-                        self.already_converted_functions
-                            .extend(converter.already_converted_functions.into_iter());
+                        if is_new {
+                            self.already_converted_functions
+                                .insert(function.addr(), rcl_func.clone());
+                            self.already_converted_functions
+                                .extend(converter.already_converted_functions.into_iter());
+                        }
                         rcl_func
                     };
 
@@ -181,6 +195,15 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
                     ),
                     spmt::VariableType::DensityInput => "DensityInput",
                     spmt::VariableType::PermutationTable => "PermutationTable",
+                    spmt::VariableType::Extern(s) => s,
+                    spmt::VariableType::Array(element_type, size) => {
+                        panic!(
+                            "Cannot construct array types directly, they should be constructed using array literals or other means"
+                        )
+                    }
+                    spmt::VariableType::Bool => panic!(
+                        "Cannot construct Bool directly, it should be a literal or a variable"
+                    ),
                 };
                 rcl::Expression::LateBoundCall {
                     function_name: format!("{}::new", type_name),
@@ -188,6 +211,31 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
                     return_type: types::convert_type(t),
                     arguments: converted_args,
                 }
+            }
+            spmt::Expression::ArrayAccess { array, index } => {
+                let array = Box::new(self.convert_expression(array));
+                let index = Box::new(self.convert_expression(index));
+                rcl::Expression::Index { base: array, index }
+            }
+            spmt::Expression::ConstructExtern { t, args } => {
+                let converted_args = args
+                    .iter()
+                    .map(|(name, arg)| (*name, self.convert_expression(arg)))
+                    .collect();
+                rcl::Expression::Construct {
+                    t: convert_type(t),
+                    args: converted_args,
+                }
+            }
+            spmt::Expression::ArrayLiteral(expressions) => {
+                let converted_elements: Vec<rcl::Expression<'_>> = expressions
+                    .iter()
+                    .map(|expr| self.convert_expression(expr))
+                    .collect();
+                if expressions.len() != converted_elements.len() {
+                    panic!("Array literal conversion error: length mismatch");
+                }
+                rcl::Expression::ArrayLiteral(converted_elements)
             }
         }
     }
@@ -213,6 +261,51 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
             (_, _) => exp, // do nothing
         };
         cast
+    }
+
+    pub fn try_convert_arguments_binary_op(
+        &mut self,
+        left: &spmt::Expression<'a>,
+        right: &spmt::Expression<'a>,
+        op: &spmt::BinaryOperator,
+    ) -> (rcl::Expression<'m>, rcl::Expression<'m>) {
+        // try to derive the types of the left and right expressions
+        let l = try_derive_type(&left);
+        let r = try_derive_type(&right);
+
+        let (left_h, right_h) = (
+            self.convert_expression(&left),
+            self.convert_expression(&right),
+        );
+
+        let (ltype, rtype) = match (l, r) {
+            (Some(lt), Some(rt)) => (lt, rt),
+            _ => {
+                return (
+                    self.convert_expression(&left),
+                    self.convert_expression(&right),
+                );
+            } // if we can't derive types, just convert without trying to match
+        };
+
+        match (op, ltype, rtype) {
+            // If one side is vec3<f32> and the other is vec3<i32>, convert the i32 to f32
+            (
+                spmt::BinaryOperator::Add
+                | spmt::BinaryOperator::Subtract
+                | spmt::BinaryOperator::Multiply
+                | spmt::BinaryOperator::Divide,
+                spmt::VariableType::I32,
+                spmt::VariableType::Bool,
+            ) => (
+                left_h,
+                rcl::Expression::Cast {
+                    expr: Box::new(right_h),
+                    to_type: convert_type(&spmt::VariableType::I32),
+                },
+            ),
+            _ => (left_h, right_h), // No conversion needed or possible
+        }
     }
 }
 

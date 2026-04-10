@@ -31,6 +31,7 @@ pub struct DensityFunction<'m> {
     pub body: Vec<Statement<'m>>,
     pub variables: Vec<Var<'m>>,
     pub helper_functions: Vec<FunctionRef<'m>>,
+    pub constants: Vec<(Var<'m>, Expression<'m>)>,
 }
 
 #[derive(Debug, Clone)]
@@ -53,7 +54,7 @@ pub struct DensityInput<'m> {
     pub dimensions: (i32, i32, i32),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PermutationTableInput {
     pub ident: String,
     pub subident: Option<String>,
@@ -62,8 +63,15 @@ pub struct PermutationTableInput {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Variable {
-    pub name: Option<String>,
+    pub name: Name,
     pub t: VariableType,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Name {
+    Anonymous,        // for variables that don't have a name (e.g. temporary variables)
+    Prefixed(String), // for variables that have a name, but it's not guaranteed to be unique
+    Named(String),    // for variables that have a unique name
 }
 
 #[derive(Clone, PartialEq, Copy, Eq)]
@@ -75,6 +83,9 @@ pub enum VariableType {
     F32,
     I32,
     I64,
+    Bool,
+    Array(&'static str, usize), // For array types, we can specify the element type and size
+    Extern(&'static str), // For external functions, we can use the name of the function as the type
 }
 
 impl Debug for VariableType {
@@ -87,6 +98,9 @@ impl Debug for VariableType {
             VariableType::F32 => write!(f, "f32"),
             VariableType::I32 => write!(f, "i32"),
             VariableType::I64 => write!(f, "i64"),
+            VariableType::Extern(name) => write!(f, "{}", name),
+            VariableType::Array(element_type, size) => write!(f, "[{}; {}]", element_type, size),
+            VariableType::Bool => write!(f, "bool"),
         }
     }
 }
@@ -107,6 +121,11 @@ pub enum Statement<'m> {
         condition: Expression<'m>,
         body: Vec<Statement<'m>>,
     },
+    Repeat {
+        count: usize,
+        body: Vec<Statement<'m>>,
+    },
+    Break,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -152,6 +171,13 @@ pub enum Expression<'m> {
     Field {
         base: Box<Expression<'m>>,
         field: String,
+        type_of_field: VariableType,
+        known_idnex: Option<usize>, // for cases where we know the index of the field (e.g. for vec3.x, vec3.y, vec3.z)
+    },
+
+    ArrayAccess {
+        array: Box<Expression<'m>>,
+        index: Box<Expression<'m>>,
     },
 
     // MakeVec3 {
@@ -163,6 +189,13 @@ pub enum Expression<'m> {
         t: VariableType,
         args: Vec<Expression<'m>>,
     },
+
+    ConstructExtern {
+        t: VariableType,
+        args: Vec<(&'static str, Expression<'m>)>,
+    },
+
+    ArrayLiteral(Vec<Expression<'m>>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

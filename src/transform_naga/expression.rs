@@ -8,20 +8,22 @@ Naga requires expressions to be emitted (via Statement::Emit) before they
 can be used. This module tracks expression ranges for proper emit generation.
 */
 
+use core::{f32, f64};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use naga::{Expression, Function, Handle, Literal, MathFunction, Span, Statement};
+use naga::{Expression, Function, Handle, Literal, MathFunction, Span, Statement, Type, TypeInner};
 
 use super::types::{TypeCache, convert_binary_op, convert_unary_op, permutation_table_var_name};
 use super::{InputKey, NagaFunctionConverter};
 use crate::spmt::model::{self as spmt, Addr};
+use crate::spmt::try_derive_type;
 
 /// Context for converting expressions within a single function.
 /// Bundles the function-local state needed during expression conversion.
 pub struct ExprContext<'m, 'a, 'b> {
-    pub func: &'b mut Function,
+    pub func: Option<&'b mut Function>,
     pub module: Rc<RefCell<naga::Module>>,
     pub type_cache: &'m TypeCache,
     pub converter: &'b mut NagaFunctionConverter<'m>,
@@ -37,7 +39,22 @@ impl<'m, 'a, 'b> ExprContext<'m, 'a, 'b> {
         converter: &'b mut NagaFunctionConverter<'m>,
     ) -> Self {
         Self {
-            func,
+            func: Some(func),
+            module,
+            type_cache,
+            converter,
+            already_converted: Vec::new(),
+            handle_cache: Vec::new(),
+        }
+    }
+
+    pub fn new_constant_context(
+        module: Rc<RefCell<naga::Module>>,
+        type_cache: &'m TypeCache,
+        converter: &'b mut NagaFunctionConverter<'m>,
+    ) -> Self {
+        Self {
+            func: None,
             module,
             type_cache,
             converter,
@@ -49,14 +66,28 @@ impl<'m, 'a, 'b> ExprContext<'m, 'a, 'b> {
     /// Append an expression and immediately emit it.
     pub(crate) fn append_and_emit(&mut self, expr: Expression) -> Handle<Expression> {
         //let old_len = self.func.expressions.len();
-        let h = self.func.expressions.append(expr, Span::UNDEFINED);
+        //let h = self.func.expressions.append(expr, Span::UNDEFINED);
         //let range = self.func.expressions.range_from(old_len);
         //self.func.body.push(Statement::Emit(range), Span::UNDEFINED);
-        h
+        self.append(expr)
     }
 
     pub(crate) fn append(&mut self, expr: Expression) -> Handle<Expression> {
-        self.func.expressions.append(expr, Span::UNDEFINED)
+        //self.func.expressions.append(expr, Span::UNDEFINED)
+        match &mut self.func {
+            Some(func) => {
+                let h = func.expressions.append(expr, Span::UNDEFINED);
+                h
+            }
+            None => {
+                let h = self
+                    .module
+                    .borrow_mut()
+                    .global_expressions
+                    .append(expr, Span::UNDEFINED);
+                h
+            }
+        }
     }
 
     /// Convert an SPMT expression to a Naga expression handle.
@@ -75,16 +106,18 @@ impl<'m, 'a, 'b> ExprContext<'m, 'a, 'b> {
                 let key = InputKey::from(*var);
                 if let Some(&handle) = self.converter.var_map.get(&key) {
                     if self.converter.value_vars.contains(&key) {
-                        // Direct value (e.g. function argument) — no Load needed
+                        // Direct value (e.g. function argument) - no Load needed
+
                         handle
                     } else {
                         // Local variable pointer — load the value
-                        self.append_and_emit(Expression::Load { pointer: handle })
+                        self.append(Expression::Load { pointer: handle })
                     }
                 } else {
-                    println!("Variable {:?} not found in converter var_map", var.name);
+                    let var_name = self.converter.get_concrete_name(*var);
+                    println!("Variable '{}' not found in converter var_map", var_name);
                     println!("Current var_map keys: {:?}", self.converter.var_map.keys());
-                    panic!("Variable {:?} not found in converter var_map", var.name);
+                    panic!("Variable '{}' not found in converter var_map", var_name);
                 }
             }
 
@@ -96,9 +129,25 @@ impl<'m, 'a, 'b> ExprContext<'m, 'a, 'b> {
                             width: 8,
                         }) =>
                     {
-                        Literal::F64(*val)
+                        // WGSL doesn't support f64 literals, so just use the max/min finite values for infinity to avoid validation errors.
+                        let fixed_val = if *val == f64::INFINITY {
+                            f64::MAX
+                        } else if *val == f64::NEG_INFINITY {
+                            f64::MIN
+                        } else {
+                            *val
+                        };
+                        Literal::F64(fixed_val)
                     }
-                    _ => Literal::F32(*val as f32),
+                    _ => {
+                        if *val == f64::INFINITY {
+                            Literal::F32(f32::MAX)
+                        } else if *val == f64::NEG_INFINITY {
+                            Literal::F32(f32::MIN)
+                        } else {
+                            Literal::F32(*val as f32)
+                        }
+                    }
                 };
                 self.append_and_emit(Expression::Literal(lit))
             }
@@ -115,6 +164,7 @@ impl<'m, 'a, 'b> ExprContext<'m, 'a, 'b> {
                 // let left_h = self.convert_expression(left);
                 // let right_h = self.convert_expression(right);
                 let (left_h, right_h) = self.try_convert_arguments_binary_op(left, right, op);
+
                 let naga_op = convert_binary_op(*op);
                 self.append_and_emit(Expression::Binary {
                     op: naga_op,
@@ -132,19 +182,33 @@ impl<'m, 'a, 'b> ExprContext<'m, 'a, 'b> {
                 })
             }
 
-            spmt::Expression::Field { base, field } => {
+            spmt::Expression::Field {
+                base,
+                field,
+                type_of_field: _,
+                known_idnex,
+            } => {
                 let base_h = self.convert_expression(base);
-                let index = match field.as_str() {
-                    "x" => 0,
-                    "y" => 1,
-                    "z" => 2,
-                    "w" => 3,
-                    _ => panic!("Unknown field name: {}", field),
-                };
-                self.append_and_emit(Expression::AccessIndex {
-                    base: base_h,
-                    index,
-                })
+                if let Some(index) = known_idnex {
+                    // If we know the index of the field, we can directly access it without matching on the field name.
+                    self.append_and_emit(Expression::AccessIndex {
+                        base: base_h,
+                        index: *index as u32,
+                    })
+                } else {
+                    // Otherwise, we match on the field name to determine the index.
+                    let index = match field.as_str() {
+                        "x" => 0,
+                        "y" => 1,
+                        "z" => 2,
+                        "w" => 3,
+                        _ => panic!("Unknown field name: {}", field),
+                    };
+                    self.append_and_emit(Expression::AccessIndex {
+                        base: base_h,
+                        index,
+                    })
+                }
             }
 
             spmt::Expression::FunctionCall {
@@ -189,11 +253,13 @@ impl<'m, 'a, 'b> ExprContext<'m, 'a, 'b> {
                 // Create CallResult expression
                 let result_expr = self
                     .func
+                    .as_mut()
+                    .unwrap()
                     .expressions
                     .append(Expression::CallResult(func_handle), Span::UNDEFINED);
 
                 // Emit the Call statement
-                self.func.body.push(
+                self.func.as_mut().unwrap().body.push(
                     Statement::Call {
                         function: func_handle,
                         arguments,
@@ -231,9 +297,11 @@ impl<'m, 'a, 'b> ExprContext<'m, 'a, 'b> {
 
                 let result_expr = self
                     .func
+                    .as_mut()
+                    .unwrap()
                     .expressions
                     .append(Expression::CallResult(func_handle), Span::UNDEFINED);
-                self.func.body.push(
+                self.func.as_mut().unwrap().body.push(
                     Statement::Call {
                         function: func_handle,
                         arguments,
@@ -260,7 +328,7 @@ impl<'m, 'a, 'b> ExprContext<'m, 'a, 'b> {
                     });
 
                 // Get the function argument expression (pointer to array)
-                let g_var_expr = self.func.expressions.append(
+                let g_var_expr = self.func.as_mut().unwrap().expressions.append(
                     Expression::GlobalVariable(arg_info.variable),
                     Span::UNDEFINED,
                 );
@@ -304,7 +372,7 @@ impl<'m, 'a, 'b> ExprContext<'m, 'a, 'b> {
                         )
                     });
 
-                let g_var_expr = self.func.expressions.append(
+                let g_var_expr = self.func.as_mut().unwrap().expressions.append(
                     Expression::GlobalVariable(arg_info.variable),
                     Span::UNDEFINED,
                 );
@@ -318,13 +386,104 @@ impl<'m, 'a, 'b> ExprContext<'m, 'a, 'b> {
             }
 
             spmt::Expression::Construct { t, args } => {
-                let naga_ty = self.type_cache.convert_type(t);
+                let naga_ty = self.type_cache.convert_type_full(
+                    &mut self.module.borrow_mut(),
+                    self.converter.extern_converter,
+                    t,
+                );
                 let mut components = Vec::new();
                 for arg in args {
                     components.push(self.convert_expression(arg));
                 }
                 self.append_and_emit(Expression::Compose {
                     ty: naga_ty,
+                    components,
+                })
+            }
+            spmt::Expression::ArrayAccess { array, index } => {
+                let array_h = self.convert_expression(array);
+                let index_h = self.convert_expression(index);
+                let element_ptr = self.append_and_emit(Expression::Access {
+                    base: array_h,
+                    index: index_h,
+                });
+                // self.append_and_emit(Expression::Load {
+                //     pointer: element_ptr,
+                // })
+                element_ptr
+            }
+            spmt::Expression::ConstructExtern { t, args } => {
+                // ConstructExtern is like Construct but with named arguments.
+                // Naga's Compose doesn't use names, so we extract just the values.
+                let naga_ty = self.type_cache.convert_type_full(
+                    &mut self.module.borrow_mut(),
+                    self.converter.extern_converter,
+                    t,
+                );
+                let mut components = Vec::new();
+                for (_name, arg) in args {
+                    components.push(self.convert_expression(arg));
+                }
+                self.append_and_emit(Expression::Compose {
+                    ty: naga_ty,
+                    components,
+                })
+            }
+            spmt::Expression::ArrayLiteral(expressions) => {
+                // ArrayLiteral creates an array from a list of expressions.
+                // We need to infer the element type from the first expression if possible.
+                if expressions.is_empty() {
+                    panic!("Cannot create an array literal with no elements");
+                }
+
+                // Convert all expressions
+                let mut components = Vec::new();
+                for expr in expressions {
+                    components.push(self.convert_expression(expr));
+                }
+
+                // Try to derive the element type from the first expression
+                let element_ty_spmt = self
+                    .try_derive_type(&expressions[0])
+                    .expect("Cannot infer array element type");
+                let element_ty = {
+                    let mut module = self.module.borrow_mut();
+                    self.type_cache.convert_type_full(
+                        &mut module,
+                        self.converter.extern_converter,
+                        &element_ty_spmt,
+                    )
+                };
+                let stride = {
+                    let module = self.module.borrow();
+                    match module.types[element_ty].inner {
+                        TypeInner::Scalar(s) => s.width as u32,
+                        TypeInner::Vector { scalar, size } => scalar.width as u32 * size as u32,
+                        TypeInner::Struct { span, .. } => span,
+                        _ => 0,
+                    }
+                };
+
+                // Create an array type
+                let array_size = naga::ArraySize::Constant(
+                    core::num::NonZeroU32::new(expressions.len() as u32)
+                        .expect("Array size must be non-zero"),
+                );
+
+                let array_ty = self.module.borrow_mut().types.insert(
+                    Type {
+                        name: None,
+                        inner: TypeInner::Array {
+                            base: element_ty,
+                            size: array_size,
+                            stride,
+                        },
+                    },
+                    Span::UNDEFINED,
+                );
+
+                self.append_and_emit(Expression::Compose {
+                    ty: array_ty,
                     components,
                 })
             }
@@ -429,8 +588,8 @@ impl<'m, 'a, 'b> ExprContext<'m, 'a, 'b> {
         op: &spmt::BinaryOperator,
     ) -> (Handle<Expression>, Handle<Expression>) {
         // try to derive the types of the left and right expressions
-        let l = self.try_derive_type(&left);
-        let r = self.try_derive_type(&right);
+        let l = try_derive_type(&left);
+        let r = try_derive_type(&right);
 
         let (left_h, right_h) = (
             self.convert_expression(&left),
@@ -471,6 +630,22 @@ impl<'m, 'a, 'b> ExprContext<'m, 'a, 'b> {
                 let converted_right = self.convert_pos3_to_vec3(right_h);
                 (left_h, converted_right)
             }
+
+            (
+                spmt::BinaryOperator::Add
+                | spmt::BinaryOperator::Subtract
+                | spmt::BinaryOperator::Multiply
+                | spmt::BinaryOperator::Divide,
+                spmt::VariableType::I32,
+                spmt::VariableType::Bool,
+            ) => {
+                // Convert bool to i32 (false -> 0, true -> 1)
+                let converted_right = self.append_and_emit(Expression::Compose {
+                    ty: self.type_cache.u32_ty,
+                    components: vec![right_h],
+                });
+                (left_h, converted_right)
+            }
             _ => (left_h, right_h), // No conversion needed or possible
         }
     }
@@ -502,6 +677,40 @@ impl<'m, 'a, 'b> ExprContext<'m, 'a, 'b> {
             spmt::Expression::DensityVariable(_, _) => Some(spmt::VariableType::DensityInput),
             spmt::Expression::PermutationTable(_) => Some(spmt::VariableType::PermutationTable),
             spmt::Expression::Construct { t, .. } => Some(*t),
+            spmt::Expression::ArrayAccess { array, index } => {
+                let array_type = self.try_derive_type(array)?;
+                match array_type {
+                    spmt::VariableType::Vec3 => Some(spmt::VariableType::F32), // Accessing a vec3 component gives f32
+                    spmt::VariableType::Pos3 => Some(spmt::VariableType::I32),
+                    spmt::VariableType::Array(element_type, _) => Some(match element_type {
+                        "f32" | "f64" => spmt::VariableType::F32,
+                        "i32" => spmt::VariableType::I32,
+                        "i64" => spmt::VariableType::I64,
+                        "bool" => spmt::VariableType::Bool,
+                        name => spmt::VariableType::Extern(name),
+                    }),
+                    _ => None, // For other array types, we would need more information to derive the element type
+                }
+            }
+            spmt::Expression::ConstructExtern { t, .. } => Some(*t),
+            spmt::Expression::ArrayLiteral(expressions) => {
+                if expressions.is_empty() {
+                    return None;
+                }
+                // Try to derive the element type from the first expression
+                let element_type = self.try_derive_type(&expressions[0])?;
+                Some(spmt::VariableType::Array(
+                    match element_type {
+                        spmt::VariableType::F32 => "f32",
+                        spmt::VariableType::I32 => "i32",
+                        spmt::VariableType::I64 => "i64",
+                        spmt::VariableType::Bool => "bool",
+                        spmt::VariableType::Extern(name) => name,
+                        _ => return None, // Cannot represent complex types as array element type strings
+                    },
+                    expressions.len(),
+                ))
+            }
         }
     }
 
