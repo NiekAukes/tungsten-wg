@@ -25,6 +25,7 @@ pub mod orchestrate;
 pub mod transform_spmt;
 
 pub mod rcl;
+pub mod cuda;
 pub mod transform_naga;
 pub mod transform_orchestration_gpu;
 pub mod transform_orchestration_rcl;
