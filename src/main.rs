@@ -24,10 +24,11 @@ pub mod orchestrate;
 
 pub mod transform_spmt;
 
-pub mod rcl;
 pub mod cuda;
+pub mod rcl;
 pub mod transform_cuda;
 pub mod transform_naga;
+pub mod transform_orchestration_cuda;
 pub mod transform_orchestration_gpu;
 pub mod transform_orchestration_rcl;
 pub mod transform_rcl;
@@ -381,7 +382,6 @@ fn gpu_codegen(
     let cuda_arena = bumpalo::Bump::new();
     let mut cuda_module = cuda::model::CudaModule::new();
     cuda_module.add_include("\"helpers.cu\"".to_string());
-    let primaries = orchestration.get_primary_shaders();
     for density_function in &program.density_functions {
         transform_cuda::add_density_to_cuda_module(
             &mut cuda_module,
@@ -392,9 +392,29 @@ fn gpu_codegen(
     }
     let cuda_generator = cuda::codegen::CudaCodeGenerator::new();
     let cuda_output = cuda_generator.generate_module(&cuda_module);
-    std::fs::write(format!("{}/src/density_function.cu", cuda_folder), cuda_output)
-        .expect("Unable to write CUDA file");
+    std::fs::write(
+        format!("{}/src/density_function.cu", cuda_folder),
+        cuda_output,
+    )
+    .expect("Unable to write CUDA file");
 
+    let mut cuda_orchestration_codegen =
+        transform_orchestration_cuda::CudaOrchestrationCodegen::new();
+    let waves = orchestration.arrange_waves();
+    for primary in &orchestration.get_primary_shaders() {
+        let pruned_waves = orchestration.arrange_waves_for(primary);
+        cuda_orchestration_codegen.convert_single_entry(
+            &primary.shader.name,
+            pruned_waves.as_ref(),
+            primary,
+        );
+    }
+    let cuda_orch_output = cuda_orchestration_codegen.finish();
+    std::fs::write(
+        format!("{}/src/orchestration.cu", cuda_folder),
+        cuda_orch_output,
+    )
+    .expect("Unable to write CUDA orchestration file");
 }
 
 #[cfg(test)]
