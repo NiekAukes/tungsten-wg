@@ -153,7 +153,6 @@ impl TypeCache {
             },
             naga::Span::UNDEFINED,
         );
-        drop(types);
 
         // Perlin generator data that bundles permutation table and octave origins.
         let perm_table_ty = extern_converter.embed_wgsl_struct(&mut module, "PerlinNoiseGenerator");

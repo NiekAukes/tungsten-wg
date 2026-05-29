@@ -133,14 +133,6 @@ fn run_with_args(args: Args) {
 
         std::fs::write("density_function.dot", dot).expect("Unable to write file");
     }
-
-    let transform_arena = bumpalo::Bump::with_capacity(1 * 1024 * 1024); // 1 MB initial capacity
-    let transformer = transform_spmt::Transformer::new(&transform_arena);
-    //println!("noise seetings keys: {:?}", mcdata.noise_settings.keys());
-    let noise_generator = mcdata.noise_settings.get("minecraft:overworld").unwrap();
-    //println!("Transforming noise generator: {:?}", noise_generator);
-    let program = transformer.transform(noise_generator);
-
     drop(arena);
 
     if args.verbose {
@@ -270,7 +262,6 @@ fn run_with_args(args: Args) {
         orchestration.arrange_waves(),
         orchestration.get_primary_shaders(),
     );
-
     // Generate a pruned orchestration function for each primary density
     for primary in &orchestration.get_primary_shaders() {
         let name = &primary.shader.name;

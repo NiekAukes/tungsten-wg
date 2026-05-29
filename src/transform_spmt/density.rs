@@ -10,9 +10,7 @@ use crate::{
     orchestrate::Scale,
     parse::model::{Density, DensityType, NormalNoise},
     spmt::model::{
-        BinaryOperator, DensityFunction, DensityFunctionRef, DensityInput, Expression, Function,
-        FunctionRef, Interned, Name, PermutationTableInput, SPMT, Statement, Var, Variable,
-        VariableType,
+        Addr, BinaryOperator, DensityFunction, DensityFunctionRef, DensityInput, Expression, Function, FunctionRef, Interned, Name, PermutationTableInput, SPMT, Statement, Var, Variable, VariableType
     },
     transform_spmt::{
         BuilderState, DensityFunctionCache, NoiseCache, anonvar, newvar, noise::lower_normal_noise,
@@ -37,13 +35,15 @@ pub struct DensityKey<'a> {
 pub struct BuilderSettings {
     pub enable_interpolation: bool,
     pub new_shader_named_densities: bool,
+    pub use_new_spline: bool,
 }
 
 impl Default for BuilderSettings {
     fn default() -> Self {
         Self {
             enable_interpolation: true,
-            new_shader_named_densities: false,
+            new_shader_named_densities: true,
+            use_new_spline: true,
         }
     }
 }
@@ -57,7 +57,7 @@ pub struct DensityBuilder<'a, 'm> {
     pub arena: &'m bumpalo::Bump,
 
     builder_state: Option<BuilderState<'a, 'm>>,
-    builder_settings: BuilderSettings,
+    pub(crate) builder_settings: BuilderSettings,
 
     density_function_inputs: HashMap<DensityKey<'a>, DensityInput<'m>>,
     noise_inputs: std::collections::HashMap<NormalNoiseKey<'a>, DensityInput<'m>>,
@@ -357,17 +357,25 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         } else {
             // lower the density into an expression
             // create a new builder to build the density function
-            let mut builder = DensityBuilder::new_named(self.arena, bs, canonical_name);
+            let mut builder = DensityBuilder::new_named(self.arena, bs, canonical_name.clone());
             //let r = builder.lower_density(density);
             let r = lower_function(&mut builder, density);
             let (density_function, helpers, bs_returned) = builder.finish(r);
-            //self.helper_functions.extend(helpers);
-            bs = bs_returned;
+            
+            // additional check to see if the density function is aliased
+            if let Some(cached) = bs_returned.density_function_cache.get(&density) {
+                let c= cached.clone();
+                bs = bs_returned;
+                c
+            } else {
+                bs = bs_returned;
 
-            let density_function_ref = DensityFunctionRef::new(self.arena.alloc(density_function));
-            bs.density_function_cache
-                .insert(density, density_function_ref.clone());
-            density_function_ref
+                let density_function_ref = DensityFunctionRef::new(self.arena.alloc(density_function));
+                
+                bs.density_function_cache
+                    .insert(density, density_function_ref.clone());
+                density_function_ref
+            }
         };
 
         // return the density input, and put back the caches into the builder state
@@ -381,12 +389,6 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         mut canonical_name: Option<String>,
         lower_function: Option<&dyn Fn(&mut Self, Density<'a>) -> Expression<'m>>,
     ) -> DensityInput<'m> {
-        // println!("Lowering density input: {:?}", density);
-        // let name = canonical_name
-        //     .clone()
-        //     .unwrap_or_else(|| "unnamed_density".to_string());
-        // println!("Density name: {}", name);
-
         // check if we already have a density function for this density
         if let Some(cached) = self.get_cached_density_input(&density) {
             return cached.clone();
@@ -415,7 +417,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         let lower_function =
             lower_function.unwrap_or(&|builder, density| builder.lower_density(density));
         let density_function_ref =
-            self._lower_density_shader_inner(density, canonical_name, lower_function);
+            self._lower_density_shader_inner(density, canonical_name.clone(), lower_function);
 
         let dimensions = self.builder_state.as_ref().unwrap().working_dimensions;
         let scaled_origin = self.builder_state.as_ref().unwrap().working_scaled_origin;
@@ -869,8 +871,6 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                 let name = format!("{}", name,);
                 // flat caches are always lowered as separate density functions
                 let input = self.lower_density_input(argument, Some(name), None);
-                // add to cache
-                self.add_density_to_cache(density, input.clone());
                 // return the density variable for the input
                 Expression::DensityVariable(input, None)
 

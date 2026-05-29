@@ -423,11 +423,6 @@ impl CudaOrchestrationCodegen {
         .unwrap();
         writeln!(self.code, "    std::vector<float> run(float3 origin) {{").unwrap();
         writeln!(self.code, "        const int BLOCK_SIZE = 256;").unwrap();
-        writeln!(
-            self.code,
-            "        int num_blocks = (total_elements + BLOCK_SIZE - 1) / BLOCK_SIZE;"
-        )
-        .unwrap();
         writeln!(self.code).unwrap();
 
         for (wave_idx, wave) in waves.iter().enumerate() {
@@ -444,29 +439,43 @@ impl CudaOrchestrationCodegen {
             for dep in wave {
                 let kernel_name = sanitize_name(&dep.shader.name);
                 let dep_name = shader_dep_name(dep);
+                let (dim_x, dim_y, dim_z) = dep.dimensions;
+                let total_elements_for_shader = dim_x as i64 * dim_y as i64 * dim_z as i64;
+
+                writeln!(
+                    self.code,
+                    "        {{ // Kernel {kernel_name} with dimensions {dim_x}x{dim_y}x{dim_z}"
+                )
+                .unwrap();
+                writeln!(
+                    self.code,
+                    "            int num_blocks = ({total_elements_for_shader} + BLOCK_SIZE - 1) / BLOCK_SIZE;"
+                )
+                .unwrap();
 
                 let (os_x, os_y, os_z) = dep.scaled_origin.as_float();
                 let (ps_x, ps_y, ps_z) = dep.scaled_position.as_float();
                 write!(
                     self.code,
-                    "        {kernel_name}<<<num_blocks, BLOCK_SIZE>>>(\n            make_int3(0, 0, 0), grid_size, origin,\n            make_float3({os_x}, {os_y}, {os_z}),\n            make_float3({ps_x}, {ps_y}, {ps_z})"
+                    "            {kernel_name}<<<num_blocks, BLOCK_SIZE>>>(\n                make_int3(0, 0, 0), make_int3({dim_x}, {dim_y}, {dim_z}), origin,\n                make_float3({os_x}, {os_y}, {os_z}),\n                make_float3({ps_x}, {ps_y}, {ps_z})"
                 )
                 .unwrap();
 
                 // Density inputs: output buffers from upstream shaders.
                 for input_dep in &dep.shader.inputs {
                     let input_sn = shader_dep_name(input_dep);
-                    write!(self.code, ",\n            d_{input_sn}_output").unwrap();
+                    write!(self.code, ",\n                d_{input_sn}_output").unwrap();
                 }
 
                 // Permutation table pointers (in order of the shader's perm table list).
                 for pt in &dep.shader.permutation_tables {
                     let pn = builders::perm_table_cuda_param_name(pt);
-                    write!(self.code, ",\n            d_{pn}").unwrap();
+                    write!(self.code, ",\n                d_{pn}").unwrap();
                 }
 
                 // Output buffer.
-                writeln!(self.code, ",\n            d_{dep_name}_output\n        );").unwrap();
+                writeln!(self.code, ",\n                d_{dep_name}_output\n            );").unwrap();
+                writeln!(self.code, "        }}").unwrap();
             }
 
             writeln!(self.code, "        cudaDeviceSynchronize();").unwrap();
@@ -475,15 +484,17 @@ impl CudaOrchestrationCodegen {
 
         // Copy target output back to host.
         let target_sn = shader_dep_name(shaders[target_idx]);
+        let (target_dim_x, target_dim_y, target_dim_z) = shaders[target_idx].dimensions;
+        let target_total_elements = target_dim_x as i64 * target_dim_y as i64 * target_dim_z as i64;
         writeln!(self.code, "        // Copy target output to host").unwrap();
         writeln!(
             self.code,
-            "        std::vector<float> result(total_elements);"
+            "        std::vector<float> result({target_total_elements});"
         )
         .unwrap();
         writeln!(
             self.code,
-            "        cudaMemcpy(result.data(), d_{target_sn}_output, buffer_size, cudaMemcpyDeviceToHost);"
+            "        cudaMemcpy(result.data(), d_{target_sn}_output, (size_t){target_total_elements} * sizeof(float), cudaMemcpyDeviceToHost);"
         )
         .unwrap();
         writeln!(self.code, "        return result;").unwrap();
