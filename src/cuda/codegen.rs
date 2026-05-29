@@ -142,7 +142,7 @@ impl CudaCodeGenerator {
             if i > 0 {
                 p.push(", ");
             }
-            if param.is_const {
+            if param.is_const && !matches!(param.t, cuda::Type::Pointer(_) | cuda::Type::ConstPointer(_)) {
                 p.push("const ");
             }
             p.push(&self.type_to_string(&param.t));

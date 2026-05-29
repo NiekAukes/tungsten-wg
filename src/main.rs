@@ -26,6 +26,7 @@ pub mod transform_spmt;
 
 pub mod rcl;
 pub mod cuda;
+pub mod transform_cuda;
 pub mod transform_naga;
 pub mod transform_orchestration_gpu;
 pub mod transform_orchestration_rcl;
@@ -374,6 +375,26 @@ fn gpu_codegen(
             }
         }
     }
+
+    // Generate CUDA code
+    let cuda_folder = "../cuda_density";
+    let cuda_arena = bumpalo::Bump::new();
+    let mut cuda_module = cuda::model::CudaModule::new();
+    cuda_module.add_include("\"helpers.cu\"".to_string());
+    let primaries = orchestration.get_primary_shaders();
+    for density_function in &program.density_functions {
+        transform_cuda::add_density_to_cuda_module(
+            &mut cuda_module,
+            density_function,
+            &cuda_arena,
+            HashMap::new(),
+        );
+    }
+    let cuda_generator = cuda::codegen::CudaCodeGenerator::new();
+    let cuda_output = cuda_generator.generate_module(&cuda_module);
+    std::fs::write(format!("{}/src/density_function.cu", cuda_folder), cuda_output)
+        .expect("Unable to write CUDA file");
+
 }
 
 #[cfg(test)]
