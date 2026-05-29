@@ -18,6 +18,12 @@ pub fn convert_type(t: &spmt::VariableType) -> rcl::Type {
         spmt::VariableType::PermutationTable => rcl::Type::Ref(Box::new(rcl::Type::Struct(
             crate::transform_rcl::PERLIN_NOISE_SAMPLER_STRUCT_NAME.to_string(),
         ))),
+        spmt::VariableType::Extern(name) => rcl::Type::Struct(sanitize_name(name)),
+        spmt::VariableType::Array(element_type, size) => {
+            // For simplicity, we can represent arrays as structs with fields like element_0, element_1, etc.
+            rcl::Type::Array(Box::new(rcl::Type::Struct(element_type.to_string())), *size)
+        }
+        spmt::VariableType::Bool => rcl::Type::Bool,
     }
 }
 

@@ -47,6 +47,19 @@ impl RustCodeGenerator {
             p.line("");
         }
 
+        // Generate constant definitions
+        for constant in &icl.constants {
+            p.push("const ");
+            let var_name = self.variable_to_string(&constant.var, &mut p);
+            p.push(&var_name);
+            p.push(": ");
+            p.push(&self.type_to_rust_string(&constant.var.t));
+            p.push(" = ");
+            let value_str = self.expression_to_string_with_printer(&mut p, &constant.value);
+            p.push(&value_str);
+            p.line(";");
+        }
+
         // Generate functions
         for func in &icl.functions {
             self.generate_function(&mut p, func, false);
@@ -329,6 +342,8 @@ impl RustCodeGenerator {
             icl::Statement::InlineRust(s) => {
                 p.line(s);
             }
+            icl::Statement::Break => p.line("break;"),
+            icl::Statement::Continue => p.line("continue;"),
         }
     }
 
@@ -342,7 +357,7 @@ impl RustCodeGenerator {
             icl::Expression::Variable(var) => self.variable_to_string(var, p),
             icl::Expression::I32Literal(val) => format!("{}_i32", val),
             icl::Expression::I64Literal(val) => format!("{}_i64", val),
-            icl::Expression::FloatLiteral(val) => format!("{}_f64", val),
+            icl::Expression::FloatLiteral(val) => self.format_float_literal(*val),
             icl::Expression::BoolLiteral(val) => format!("{}", val),
             icl::Expression::BinaryOp { op, left, right } => {
                 format!(
@@ -447,6 +462,30 @@ impl RustCodeGenerator {
                 format!("({})", expr_strs.join(", "))
             }
             icl::Expression::InlineRust(s) => s.clone(),
+            icl::Expression::ArrayLiteral(expressions) => {
+                let expr_strs: Vec<String> = expressions
+                    .iter()
+                    .map(|e| self.expression_to_string_with_printer(p, e))
+                    .collect();
+                format!("[{}]", expr_strs.join(", "))
+            }
+            icl::Expression::Construct { t, args } => {
+                let arg_strs: Vec<String> = args
+                    .iter()
+                    .map(|(name, expr)| {
+                        format!(
+                            "{}: {}",
+                            name,
+                            self.expression_to_string_with_printer(p, expr)
+                        )
+                    })
+                    .collect();
+                format!(
+                    "{} {{ {} }}",
+                    self.type_to_rust_string(t),
+                    arg_strs.join(", ")
+                )
+            }
         }
     }
 
@@ -523,6 +562,19 @@ impl RustCodeGenerator {
                     items.iter().map(|t| self.type_to_rust_string(t)).collect();
                 format!("({})", item_strs.join(", "))
             }
+        }
+    }
+
+    /// Format float literal with appropriate suffix
+    fn format_float_literal(&self, val: f64) -> String {
+        if val == f64::INFINITY {
+            "f64::INFINITY".to_string()
+        } else if val == f64::NEG_INFINITY {
+            "f64::NEG_INFINITY".to_string()
+        } else if val.is_nan() {
+            "f64::NAN".to_string()
+        } else {
+            format!("{}_f64", val)
         }
     }
 }

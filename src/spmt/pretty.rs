@@ -2,6 +2,7 @@ use std::fmt::Write;
 
 use crate::spmt::model::{
     Addr, BinaryOperator, DensityFunction, Expression, Function, SPMT, Statement, UnaryOperator,
+    Var,
 };
 
 const INDENT: &str = "    ";
@@ -117,10 +118,7 @@ impl<'m> PrettyPrint for Function<'m> {
             if i > 0 {
                 p.push(", ");
             }
-            let param_name = param
-                .name
-                .clone()
-                .unwrap_or_else(|| p.anon_name(*param, "param"));
+            let param_name = param.concrete_name(p);
             write!(p.line, "{}: {:?}", param_name, param.t).unwrap();
         }
 
@@ -191,10 +189,7 @@ impl<'m> PrettyPrint for Statement<'m> {
     fn pretty(&self, p: &mut Printer) {
         match self {
             Statement::Assign { target, value } => {
-                let target_name = target
-                    .name
-                    .clone()
-                    .unwrap_or_else(|| p.anon_name(*target, "var"));
+                let target_name = target.concrete_name(p);
                 p.push(&target_name);
                 p.push(" = ");
                 value.pretty(p);
@@ -250,6 +245,21 @@ impl<'m> PrettyPrint for Statement<'m> {
                 p.dedent();
                 p.line("}");
             }
+            Statement::Repeat { count, body } => {
+                p.push(&format!("repeat {}", count));
+                p.line(" {");
+                p.indent();
+
+                for s in body {
+                    s.pretty(p);
+                }
+
+                p.dedent();
+                p.line("}");
+            }
+            Statement::Break => {
+                p.line("break;");
+            }
         }
     }
 }
@@ -261,7 +271,7 @@ impl<'m> PrettyPrint for Expression<'m> {
     fn pretty(&self, p: &mut Printer) {
         match self {
             Expression::Variable(v) => {
-                let name = v.name.clone().unwrap_or(p.anon_name(v.clone(), "var"));
+                let name = v.concrete_name(p);
                 p.push(&name);
             }
             Expression::Float(v) => {
@@ -358,7 +368,12 @@ impl<'m> PrettyPrint for Expression<'m> {
                 });
                 operand.pretty(p);
             }
-            Expression::Field { base, field } => {
+            Expression::Field {
+                base,
+                field,
+                type_of_field: _,
+                known_idnex: _,
+            } => {
                 base.pretty(p);
                 p.push(".");
                 p.push(field);
@@ -372,6 +387,34 @@ impl<'m> PrettyPrint for Expression<'m> {
                     arg.pretty(p);
                 }
                 p.push(")");
+            }
+            Expression::ArrayAccess { array, index } => {
+                array.pretty(p);
+                p.push("[");
+                index.pretty(p);
+                p.push("]");
+            }
+            Expression::ConstructExtern { t, args } => {
+                p.push(&format!("extern {:?}(", t));
+                for (i, (arg_name, arg_expr)) in args.iter().enumerate() {
+                    if i > 0 {
+                        p.push(", ");
+                    }
+                    p.push(arg_name);
+                    p.push(": ");
+                    arg_expr.pretty(p);
+                }
+                p.push(")");
+            }
+            Expression::ArrayLiteral(expressions) => {
+                p.push("[");
+                for (i, expr) in expressions.iter().enumerate() {
+                    if i > 0 {
+                        p.push(", ");
+                    }
+                    expr.pretty(p);
+                }
+                p.push("]");
             }
         }
     }
@@ -390,5 +433,18 @@ impl<'m> DensityFunction<'m> {
 
         // Print the density function itself
         self.pretty(p);
+    }
+}
+pub trait ConcreteName {
+    fn concrete_name(&self, p: &mut Printer) -> String;
+}
+
+impl ConcreteName for Var<'_> {
+    fn concrete_name(&self, p: &mut Printer) -> String {
+        match &self.clone().name {
+            super::model::Name::Anonymous => p.anon_name(*self, "var"),
+            super::model::Name::Prefixed(pre) => p.anon_name(*self, pre),
+            super::model::Name::Named(n) => n.clone(),
+        }
     }
 }
