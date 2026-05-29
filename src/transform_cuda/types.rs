@@ -20,6 +20,12 @@ pub fn convert_type(t: &spmt::VariableType) -> cuda::Type {
         spmt::VariableType::PermutationTable => {
             cuda::Type::ConstPointer(Box::new(cuda::Type::Int8))
         }
+        spmt::VariableType::Bool => cuda::Type::Int32,
+        spmt::VariableType::Array(elem_type, size) => {
+            let elem_type = Box::new(convert_type(elem_type));
+            cuda::Type::Array(elem_type, *size)
+        }
+        spmt::VariableType::Extern(name) => cuda::Type::Struct(name.to_string()),
     }
 }
 
@@ -54,6 +60,10 @@ pub fn permutation_table_param_name(perm_table: &spmt::PermutationTableInput) ->
         "perm_table_{}_{}_{}",
         perm_table.ident,
         perm_table.subident_index,
-        perm_table.subident.as_ref().map(|s| s.as_str()).unwrap_or("")
+        perm_table
+            .subident
+            .as_ref()
+            .map(|s| s.as_str())
+            .unwrap_or("")
     ))
 }

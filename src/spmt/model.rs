@@ -74,7 +74,7 @@ pub enum Name {
     Named(String),    // for variables that have a unique name
 }
 
-#[derive(Clone, PartialEq, Copy, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum VariableType {
     DensityInput,
     PermutationTable,
@@ -84,7 +84,7 @@ pub enum VariableType {
     I32,
     I64,
     Bool,
-    Array(&'static str, usize), // For array types, we can specify the element type and size
+    Array(Box<VariableType>, usize), // For array types, we can specify the element type and size
     Extern(&'static str), // For external functions, we can use the name of the function as the type
 }
 
@@ -99,7 +99,9 @@ impl Debug for VariableType {
             VariableType::I32 => write!(f, "i32"),
             VariableType::I64 => write!(f, "i64"),
             VariableType::Extern(name) => write!(f, "{}", name),
-            VariableType::Array(element_type, size) => write!(f, "[{}; {}]", element_type, size),
+            VariableType::Array(element_type, size) => {
+                write!(f, "array[{:?}; {}]", element_type, size)
+            }
             VariableType::Bool => write!(f, "bool"),
         }
     }

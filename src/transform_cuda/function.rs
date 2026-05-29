@@ -31,19 +31,18 @@ pub fn convert_function<'a, 'm>(
 
     let mut cuda_func = cuda::CudaFunction::new(
         cuda::FunctionQualifier::Device,
-        spmt_func
-            .canonical_name
-            .as_deref()
-            .map(sanitize_name),
+        spmt_func.canonical_name.as_deref().map(sanitize_name),
         cuda::Type::Float,
     );
 
     // Parameters from the SPMT function signature.
     for (i, param_var) in spmt_func.parameters.iter().enumerate() {
         let param_type = convert_type(&param_var.t);
-        let param_name = sanitize_name(
-            &param_var.name.clone().unwrap_or_else(|| format!("param{}", i)),
-        );
+        let param_name = match &param_var.name {
+            spmt::Name::Named(n) => sanitize_name(n),
+            spmt::Name::Prefixed(n) => format!("{}_{}", sanitize_name(n), i),
+            spmt::Name::Anonymous => format!("param{}", i),
+        };
         cuda_func.add_parameter(param_name, param_type, false);
     }
 
@@ -55,7 +54,7 @@ pub fn convert_function<'a, 'm>(
     // Register local variables.
     for var in &spmt_func.variables {
         let cuda_var = Rc::new(cuda::Variable {
-            name: var.name.as_deref().map(sanitize_name),
+            name: var.name.clone(),
             t: convert_type(&var.t),
             memory_qualifier: None,
         });
@@ -102,13 +101,11 @@ pub fn convert_density_function<'a, 'm>(
     // ── Build the density-input parameter map ────────────────────────────
     let mut density_input_params: HashMap<InputKey, cuda::Parameter> = HashMap::new();
     for (i, input) in spmt_df.density_inputs.iter().enumerate() {
-        let param_name = sanitize_name(
-            &input
-                .var
-                .name
-                .clone()
-                .unwrap_or_else(|| format!("input_{}", i)),
-        );
+        let param_name = match &input.var.name {
+            spmt::Name::Named(n) => sanitize_name(n),
+            spmt::Name::Prefixed(n) => format!("{}_{}", sanitize_name(n), i),
+            spmt::Name::Anonymous => format!("input_{}", i),
+        };
         let param = cuda::Parameter {
             name: param_name.clone(),
             t: cuda::Type::ConstPointer(Box::new(cuda::Type::Float)),
@@ -139,10 +136,7 @@ pub fn convert_density_function<'a, 'm>(
     }
 
     // ── Build the __global__ kernel ──────────────────────────────────────
-    let kernel_name = spmt_df
-        .canonical_name
-        .as_deref()
-        .map(sanitize_name);
+    let kernel_name = spmt_df.canonical_name.as_deref().map(sanitize_name);
 
     let mut kernel = cuda::CudaFunction::new(
         cuda::FunctionQualifier::Global,
@@ -151,12 +145,36 @@ pub fn convert_density_function<'a, 'm>(
     );
 
     // Standard parameters:
-    //   int3 base_pos    — bottom-left voxel coordinate of this batch
-    //   int3 dimensions  — size of the output volume (x * y * z threads)
-    //   float3 origin    — world-space origin offset (passed into the body as `origin`)
-    kernel.add_parameter("base_pos".to_string(), cuda::Type::Struct("int3".to_string()), false);
-    kernel.add_parameter("dimensions".to_string(), cuda::Type::Struct("int3".to_string()), false);
-    kernel.add_parameter("origin".to_string(), cuda::Type::Struct("float3".to_string()), false);
+    //   int3 base_pos         — bottom-left voxel coordinate of this batch
+    //   int3 dimensions       — size of the output volume (x * y * z threads)
+    //   float3 origin         — world-space origin offset (passed into the body as `origin`)
+    //   float3 origin_scale   — per-axis scale applied to the origin
+    //   float3 position_scale — per-axis scale applied to the position
+    kernel.add_parameter(
+        "base_pos".to_string(),
+        cuda::Type::Struct("int3".to_string()),
+        false,
+    );
+    kernel.add_parameter(
+        "dimensions".to_string(),
+        cuda::Type::Struct("int3".to_string()),
+        false,
+    );
+    kernel.add_parameter(
+        "origin".to_string(),
+        cuda::Type::Struct("float3".to_string()),
+        false,
+    );
+    kernel.add_parameter(
+        "origin_scale".to_string(),
+        cuda::Type::Struct("float3".to_string()),
+        false,
+    );
+    kernel.add_parameter(
+        "position_scale".to_string(),
+        cuda::Type::Struct("float3".to_string()),
+        false,
+    );
 
     // Density input pointers: `const double* input_N`
     for (_, param) in density_inputs.as_ref() {
@@ -199,13 +217,14 @@ pub fn convert_density_function<'a, 'm>(
         "int uz__ = tid / (dimensions.x * dimensions.y);".to_string(),
     ));
     kernel.add_statement(cuda::Statement::InlineCuda(
-        "int3 pos3 = make_int3(base_pos.x + ux__, base_pos.y + uy__, base_pos.z + uz__);".to_string(),
+        "int3 pos3 = make_int3(base_pos.x + ux__, base_pos.y + uy__, base_pos.z + uz__);"
+            .to_string(),
     ));
 
     // Register local variables from the SPMT density function.
     for var in &spmt_df.variables {
         let cuda_var = Rc::new(cuda::Variable {
-            name: var.name.as_deref().map(sanitize_name),
+            name: var.name.clone(),
             t: convert_type(&var.t),
             memory_qualifier: None,
         });
@@ -213,9 +232,25 @@ pub fn convert_density_function<'a, 'm>(
         kernel.add_variable(cuda_var);
     }
 
+    // Emit constant array declarations with their initializers.
+    for (var, init_expr) in &spmt_df.constants {
+        let cuda_var = Rc::new(cuda::Variable {
+            name: var.name.clone(),
+            t: convert_type(&var.t),
+            memory_qualifier: None,
+        });
+        converter.register_variable(var.clone(), cuda_var.clone());
+        let init = converter.convert_expression(init_expr);
+        kernel.add_statement(cuda::Statement::Declare {
+            variable: cuda_var,
+            init: Some(init),
+            is_const: true,
+        });
+    }
+
     // A `result` variable to capture the return value from the body.
     let result_var = Rc::new(cuda::Variable {
-        name: Some("result".to_string()),
+        name: spmt::Name::Named("result".to_string()),
         t: cuda::Type::Float,
         memory_qualifier: None,
     });

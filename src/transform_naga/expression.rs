@@ -661,7 +661,7 @@ impl<'m, 'a, 'b> ExprContext<'m, 'a, 'b> {
 
     fn try_derive_type(&self, expr: &spmt::Expression<'a>) -> Option<spmt::VariableType> {
         match expr {
-            spmt::Expression::Variable(var) => Some(var.t),
+            spmt::Expression::Variable(var) => Some(var.t.clone()),
             spmt::Expression::Float(_) => Some(spmt::VariableType::F32), // or F64 depending on precision
             spmt::Expression::Int(_) => Some(spmt::VariableType::I32),
             spmt::Expression::Long(_) => Some(spmt::VariableType::I64),
@@ -676,23 +676,24 @@ impl<'m, 'a, 'b> ExprContext<'m, 'a, 'b> {
             spmt::Expression::ExternCall { .. } => None, // Could be derived from extern declaration if needed
             spmt::Expression::DensityVariable(_, _) => Some(spmt::VariableType::DensityInput),
             spmt::Expression::PermutationTable(_) => Some(spmt::VariableType::PermutationTable),
-            spmt::Expression::Construct { t, .. } => Some(*t),
+            spmt::Expression::Construct { t, .. } => Some(t.clone()),
             spmt::Expression::ArrayAccess { array, index } => {
                 let array_type = self.try_derive_type(array)?;
                 match array_type {
                     spmt::VariableType::Vec3 => Some(spmt::VariableType::F32), // Accessing a vec3 component gives f32
                     spmt::VariableType::Pos3 => Some(spmt::VariableType::I32),
-                    spmt::VariableType::Array(element_type, _) => Some(match element_type {
-                        "f32" | "f64" => spmt::VariableType::F32,
-                        "i32" => spmt::VariableType::I32,
-                        "i64" => spmt::VariableType::I64,
-                        "bool" => spmt::VariableType::Bool,
-                        name => spmt::VariableType::Extern(name),
-                    }),
+                    // spmt::VariableType::Array(element_type, _) => Some(match element_type {
+                    //     "f32" | "f64" => spmt::VariableType::F32,
+                    //     "i32" => spmt::VariableType::I32,
+                    //     "i64" => spmt::VariableType::I64,
+                    //     "bool" => spmt::VariableType::Bool,
+                    //     name => spmt::VariableType::Extern(name),
+                    // }),
+                    spmt::VariableType::Array(element_type, _) => Some(*element_type),
                     _ => None, // For other array types, we would need more information to derive the element type
                 }
             }
-            spmt::Expression::ConstructExtern { t, .. } => Some(*t),
+            spmt::Expression::ConstructExtern { t, .. } => Some(t.clone()),
             spmt::Expression::ArrayLiteral(expressions) => {
                 if expressions.is_empty() {
                     return None;
@@ -700,14 +701,15 @@ impl<'m, 'a, 'b> ExprContext<'m, 'a, 'b> {
                 // Try to derive the element type from the first expression
                 let element_type = self.try_derive_type(&expressions[0])?;
                 Some(spmt::VariableType::Array(
-                    match element_type {
-                        spmt::VariableType::F32 => "f32",
-                        spmt::VariableType::I32 => "i32",
-                        spmt::VariableType::I64 => "i64",
-                        spmt::VariableType::Bool => "bool",
-                        spmt::VariableType::Extern(name) => name,
-                        _ => return None, // Cannot represent complex types as array element type strings
-                    },
+                    // match element_type {
+                    //     spmt::VariableType::F32 => "f32",
+                    //     spmt::VariableType::I32 => "i32",
+                    //     spmt::VariableType::I64 => "i64",
+                    //     spmt::VariableType::Bool => "bool",
+                    //     spmt::VariableType::Extern(name) => name,
+                    //     _ => return None, // Cannot represent complex types as array element type strings
+                    // },
+                    Box::new(element_type),
                     expressions.len(),
                 ))
             }
@@ -725,7 +727,7 @@ impl<'m, 'a, 'b> ExprContext<'m, 'a, 'b> {
             | spmt::BinaryOperator::Subtract
             | spmt::BinaryOperator::Multiply
             | spmt::BinaryOperator::Divide => {
-                match (left_type, right_type) {
+                match (&left_type, &right_type) {
                     (spmt::VariableType::Vec3, spmt::VariableType::Pos3)
                     | (spmt::VariableType::Pos3, spmt::VariableType::Vec3) => {
                         Some(spmt::VariableType::Vec3)

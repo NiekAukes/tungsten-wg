@@ -14,13 +14,9 @@ The model mirrors the structure of the RCL (CPU) model so that SPMT → CUDA
 transformations are straightforward.
 */
 
-use std::{
-    fmt::Debug,
-    hash::Hash,
-    rc::Rc,
-};
+use std::{fmt::Debug, hash::Hash, rc::Rc};
 
-use crate::spmt::model::Interned;
+use crate::spmt::model::{Interned, Name};
 
 // ---------------------------------------------------------------------------
 // Root
@@ -100,10 +96,7 @@ impl Type {
     }
 
     pub fn is_vector(&self) -> bool {
-        matches!(
-            self,
-            Type::Float2 | Type::Float4 | Type::Int2 | Type::Int4
-        )
+        matches!(self, Type::Float2 | Type::Float4 | Type::Int2 | Type::Int4)
     }
 }
 
@@ -239,7 +232,7 @@ pub struct Parameter {
 /// A local variable used inside a function body.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Variable {
-    pub name: Option<String>,
+    pub name: Name,
     pub t: Type,
     pub memory_qualifier: Option<MemoryQualifier>,
 }
@@ -349,6 +342,9 @@ pub enum Statement<'m> {
     /// `__syncthreads();`
     SyncThreads,
 
+    /// `break;`
+    Break,
+
     /// Verbatim CUDA C++ code inserted directly into the output.
     InlineCuda(String),
 }
@@ -449,6 +445,10 @@ pub enum Expression<'m> {
     BlockDim(Axis),
     /// `gridDim.x / gridDim.y / gridDim.z`
     GridDim(Axis),
+
+    // --- Aggregate initializers -----------------------------------------
+    /// Aggregate array initializer: `{e1, e2, e3}`
+    ArrayLiteral(Vec<Expression<'m>>),
 
     // --- Escape hatch ---------------------------------------------------
     /// Verbatim CUDA C++ expression inserted directly into the output.

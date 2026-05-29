@@ -320,7 +320,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
             self.arena,
             "decision_tree",
             VariableType::Array(
-                "DecisionTreeNode", // (next_coord_idx, next_decision_idx, location)
+                Box::new(VariableType::Extern("DecisionTreeNode")), // (next_coord_idx, next_decision_idx, location)
                 decisions.len(),
             ),
         );
@@ -330,7 +330,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         let values_var = prefixvar(
             self.arena,
             "values",
-            VariableType::Array("SplineValue", values.len()),
+            VariableType::Array(Box::new(VariableType::Extern("SplineValue")), values.len()),
         );
         let values_init = self.make_values_init(&values);
         self.add_constant(values_var.clone(), values_init);
@@ -373,7 +373,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         let coordinates_array_var = prefixvar(
             self.arena,
             "coordinates",
-            VariableType::Array("f64", coordinates.len()),
+            VariableType::Array(Box::new(VariableType::F32), coordinates.len()),
         );
 
         let lits: Vec<Expression<'_>> = coordinate_vars

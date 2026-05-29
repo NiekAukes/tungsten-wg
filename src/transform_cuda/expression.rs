@@ -34,7 +34,7 @@ impl<'a, 'm> CudaFunctionConverter<'m> {
                 cuda::Expression::UnaryOp { op, operand }
             }
 
-            spmt::Expression::Field { base, field } => {
+            spmt::Expression::Field { base, field, .. } => {
                 let base = Box::new(self.convert_expression(base));
                 cuda::Expression::Field {
                     base,
@@ -92,7 +92,7 @@ impl<'a, 'm> CudaFunctionConverter<'m> {
                 let arguments = parameters
                     .iter()
                     .zip(parameter_types.iter())
-                    .map(|(p, pt)| self.convert_argument(p, *pt))
+                    .map(|(p, pt)| self.convert_argument(p, pt.clone()))
                     .collect();
                 cuda::Expression::LateBoundCall {
                     function_name: function_name.clone(),
@@ -122,7 +122,7 @@ impl<'a, 'm> CudaFunctionConverter<'m> {
 
                 cuda::Expression::Index {
                     base: Box::new(cuda::Expression::Variable(Rc::new(cuda::Variable {
-                        name: Some(param.name),
+                        name: spmt::Name::Named(param.name),
                         t: param.t,
                         memory_qualifier: None,
                     }))),
@@ -133,17 +133,14 @@ impl<'a, 'm> CudaFunctionConverter<'m> {
             spmt::Expression::PermutationTable(input) => {
                 // Passed as `const int8_t* perm_table_X` — return a variable reference.
                 cuda::Expression::Variable(Rc::new(cuda::Variable {
-                    name: Some(permutation_table_param_name(input)),
+                    name: spmt::Name::Named(permutation_table_param_name(input)),
                     t: cuda::Type::ConstPointer(Box::new(cuda::Type::Int8)),
                     memory_qualifier: None,
                 }))
             }
 
             spmt::Expression::Construct { t, args } => {
-                let converted_args = args
-                    .iter()
-                    .map(|a| self.convert_expression(a))
-                    .collect();
+                let converted_args = args.iter().map(|a| self.convert_expression(a)).collect();
                 // Map to CUDA built-in constructor functions.
                 let func_name = match t {
                     spmt::VariableType::Vec3 => "make_float3",
@@ -154,6 +151,30 @@ impl<'a, 'm> CudaFunctionConverter<'m> {
                     function_name: func_name.to_string(),
                     arguments: converted_args,
                 }
+            }
+
+            spmt::Expression::ArrayAccess { array, index } => {
+                let base = Box::new(self.convert_expression(array));
+                let index = Box::new(self.convert_expression(index));
+                cuda::Expression::Index { base, index }
+            }
+            spmt::Expression::ConstructExtern { t, args } => {
+                let struct_name = match t {
+                    spmt::VariableType::Extern(name) => name.to_string(),
+                    other => panic!("ConstructExtern used with non-Extern type {:?}", other),
+                };
+                let fields = args
+                    .iter()
+                    .map(|(field, expr)| (field.to_string(), self.convert_expression(expr)))
+                    .collect();
+                cuda::Expression::StructInit {
+                    struct_name,
+                    fields,
+                }
+            }
+            spmt::Expression::ArrayLiteral(exprs) => {
+                let converted = exprs.iter().map(|e| self.convert_expression(e)).collect();
+                cuda::Expression::ArrayLiteral(converted)
             }
         }
     }
@@ -236,7 +257,7 @@ fn pos3_to_flat_index_expr<'m>(dimensions: (i32, i32, i32)) -> cuda::Expression<
 
 fn pos3_var<'m>() -> cuda::Expression<'m> {
     cuda::Expression::Variable(Rc::new(cuda::Variable {
-        name: Some("pos3".to_string()),
+        name: spmt::Name::Named("pos3".to_string()),
         t: cuda::Type::Struct("int3".to_string()),
         memory_qualifier: None,
     }))

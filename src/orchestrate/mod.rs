@@ -31,6 +31,10 @@ impl Scale {
     pub fn as_float(&self) -> (f32, f32, f32) {
         (self.rx as f32, self.ry as f32, self.rz as f32)
     }
+
+    pub fn as_int(&self) -> (u32, u32, u32) {
+        (self.x, self.y, self.z)
+    }
 }
 
 pub trait Flatten {

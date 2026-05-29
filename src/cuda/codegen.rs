@@ -142,7 +142,12 @@ impl CudaCodeGenerator {
             if i > 0 {
                 p.push(", ");
             }
-            if param.is_const && !matches!(param.t, cuda::Type::Pointer(_) | cuda::Type::ConstPointer(_)) {
+            if param.is_const
+                && !matches!(
+                    param.t,
+                    cuda::Type::Pointer(_) | cuda::Type::ConstPointer(_)
+                )
+            {
                 p.push("const ");
             }
             p.push(&self.type_to_string(&param.t));
@@ -176,14 +181,14 @@ impl CudaCodeGenerator {
         if let Some(q) = &v.memory_qualifier {
             p.push(&format!("{} ", q));
         }
-        p.push(&self.type_to_string(&v.t));
-        p.push(" ");
-        if let Some(name) = &v.name {
-            p.push(name);
-        } else {
-            let anon = sanitize_name(&p.anon_name(v.clone(), "var"));
-            p.push(&anon);
-        }
+        let name = match &v.name {
+            crate::spmt::model::Name::Anonymous => sanitize_name(&p.anon_name(v.clone(), "var")),
+            crate::spmt::model::Name::Prefixed(prefix) => {
+                sanitize_name(&p.anon_name(v.clone(), &prefix))
+            }
+            crate::spmt::model::Name::Named(n) => sanitize_name(n),
+        };
+        p.push(&self.type_decl_string(&v.t, &name));
         p.line(";");
     }
 
@@ -279,10 +284,8 @@ impl CudaCodeGenerator {
                     // Strip the trailing newline by generating into a sub-printer
                     let init_str = self.stmt_to_inline_string(p, init_stmt);
                     p.push(&init_str);
-                } else {
-                    p.push(";");
                 }
-                p.push(" ");
+                p.push("; ");
                 if let Some(cond_expr) = condition {
                     let cond = self.expression_to_string(p, cond_expr);
                     p.push(&cond);
@@ -312,10 +315,8 @@ impl CudaCodeGenerator {
                 if *is_const {
                     p.push("const ");
                 }
-                p.push(&self.type_to_string(&variable.t));
-                p.push(" ");
                 let name = self.variable_name(variable, p);
-                p.push(&name);
+                p.push(&self.type_decl_string(&variable.t, &name));
                 if let Some(expr) = init {
                     p.push(" = ");
                     let val = self.expression_to_string(p, expr);
@@ -344,6 +345,10 @@ impl CudaCodeGenerator {
                 p.line("__syncthreads();");
             }
 
+            cuda::Statement::Break => {
+                p.line("break;");
+            }
+
             cuda::Statement::InlineCuda(s) => {
                 p.line(s);
             }
@@ -369,13 +374,13 @@ impl CudaCodeGenerator {
                     .map(|q| format!("{} ", q))
                     .unwrap_or_default();
                 let const_prefix = if *is_const { "const " } else { "" };
-                let type_str = self.type_to_string(&variable.t);
                 let name = self.variable_name(variable, p);
+                let decl = self.type_decl_string(&variable.t, &name);
                 let init_str = init
                     .as_ref()
                     .map(|e| format!(" = {}", self.expression_to_string(p, e)))
                     .unwrap_or_default();
-                format!("{}{}{} {}{};", qualifier, const_prefix, type_str, name, init_str)
+                format!("{}{}{}{}", qualifier, const_prefix, decl, init_str)
             }
             _ => {
                 // Fallback for other statement types — emit normally and strip newline
@@ -395,8 +400,34 @@ impl CudaCodeGenerator {
             cuda::Expression::U32Literal(v) => format!("{}u", v),
             cuda::Expression::I64Literal(v) => format!("{}LL", v),
             cuda::Expression::U64Literal(v) => format!("{}ULL", v),
-            cuda::Expression::F32Literal(v) => format!("{}f", v),
-            cuda::Expression::F64Literal(v) => format!("{}", v),
+            cuda::Expression::F32Literal(v) => {
+                // if float is infinity or NaN, we need to use the special literals
+                if v.is_infinite() {
+                    if v.is_sign_positive() {
+                        "INFINITY".to_string()
+                    } else {
+                        "-INFINITY".to_string()
+                    }
+                } else if v.is_nan() {
+                    "NAN".to_string()
+                } else {
+                    format!("{}f", v)
+                }
+            }
+            cuda::Expression::F64Literal(v) => {
+                // if float is infinity or NaN, we need to use the special literals
+                if v.is_infinite() {
+                    if v.is_sign_positive() {
+                        "INFINITY".to_string()
+                    } else {
+                        "-INFINITY".to_string()
+                    }
+                } else if v.is_nan() {
+                    "NAN".to_string()
+                } else {
+                    format!("{}", v)
+                }
+            }
             cuda::Expression::BoolLiteral(v) => format!("{}", v),
 
             cuda::Expression::BinaryOp { op, left, right } => {
@@ -471,9 +502,7 @@ impl CudaCodeGenerator {
             } => {
                 let field_strs: Vec<String> = fields
                     .iter()
-                    .map(|(name, e)| {
-                        format!(".{} = {}", name, self.expression_to_string(p, e))
-                    })
+                    .map(|(name, e)| format!(".{} = {}", name, self.expression_to_string(p, e)))
                     .collect();
                 format!("({}){{ {} }}", struct_name, field_strs.join(", "))
             }
@@ -482,6 +511,14 @@ impl CudaCodeGenerator {
             cuda::Expression::BlockIdx(axis) => format!("blockIdx.{}", axis),
             cuda::Expression::BlockDim(axis) => format!("blockDim.{}", axis),
             cuda::Expression::GridDim(axis) => format!("gridDim.{}", axis),
+
+            cuda::Expression::ArrayLiteral(exprs) => {
+                let items: Vec<String> = exprs
+                    .iter()
+                    .map(|e| self.expression_to_string(p, e))
+                    .collect();
+                format!("{{{}}}", items.join(", "))
+            }
 
             cuda::Expression::InlineCuda(s) => s.clone(),
         }
@@ -492,15 +529,26 @@ impl CudaCodeGenerator {
     // -----------------------------------------------------------------------
 
     fn variable_name(&self, v: &std::rc::Rc<cuda::Variable>, p: &mut Printer) -> String {
-        if let Some(name) = &v.name {
-            name.clone()
-        } else {
-            sanitize_name(&p.anon_name(v.clone(), "var"))
+        match &v.name {
+            crate::spmt::model::Name::Named(n) => sanitize_name(n),
+            crate::spmt::model::Name::Prefixed(prefix) => {
+                sanitize_name(&p.anon_name(v.clone(), prefix))
+            }
+            crate::spmt::model::Name::Anonymous => sanitize_name(&p.anon_name(v.clone(), "var")),
         }
     }
 
     fn type_to_string(&self, t: &cuda::Type) -> String {
         format!("{}", t)
+    }
+
+    /// Generate the C/C++ declarator string for a variable of type `t` named `name`.
+    /// For array types this must be `elem_type name[N]` rather than `elem_type[N] name`.
+    fn type_decl_string(&self, t: &cuda::Type, name: &str) -> String {
+        match t {
+            cuda::Type::Array(inner, n) => format!("{} {}[{}]", inner, name, n),
+            other => format!("{} {}", other, name),
+        }
     }
 
     fn binary_op_to_str(&self, op: cuda::BinaryOperator) -> &'static str {

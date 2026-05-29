@@ -172,7 +172,7 @@ impl TypeCache {
         );
 
         // Create DensityParams struct combining origin, dimensions, origin_scale, position_scale
-        // Layout (std140): vec3<f32> origin (16 bytes), vec3<u32> dimensions (16 bytes), 
+        // Layout (std140): vec3<f32> origin (16 bytes), vec3<u32> dimensions (16 bytes),
         //                  vec3<f32> origin_scale (16 bytes), vec3<f32> position_scale (16 bytes)
         // Total: 64 bytes
         let density_params_ty = types.insert(
@@ -264,8 +264,9 @@ impl TypeCache {
             }
             spmt::VariableType::Array(element_type_name, size) => {
                 // First, get or create the element type
-                let element_ty = self.get_or_create_element_type(module, extern_converter, element_type_name);
-                
+                //let element_ty = self.get_or_create_element_type(module, extern_converter, element_type_name);
+                let element_ty =
+                    self.convert_type_full(module, extern_converter, element_type_name);
                 // Calculate stride based on element type
                 let stride = match module.types[element_ty].inner {
                     TypeInner::Scalar(s) => s.width as u32,
@@ -273,7 +274,7 @@ impl TypeCache {
                     TypeInner::Struct { span, .. } => span,
                     _ => 0, // Let naga compute the stride
                 };
-                
+
                 // Create the array type
                 module.types.insert(
                     Type {
@@ -335,7 +336,6 @@ impl TypeCache {
             naga::Span::UNDEFINED,
         )
     }
-
 }
 
 /// Convert an SPMT binary operator to a Naga binary operator.

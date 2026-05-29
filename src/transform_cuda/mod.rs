@@ -111,7 +111,7 @@ impl<'m> CudaFunctionConverter<'m> {
         let mut var_map = HashMap::new();
         for (key, param) in density_function_inputs.as_ref() {
             let cuda_var = Rc::new(cuda::Variable {
-                name: Some(param.name.clone()),
+                name: spmt::Name::Named(param.name.clone()),
                 t: param.t.clone(),
                 memory_qualifier: None,
             });
@@ -142,7 +142,7 @@ impl<'m> CudaFunctionConverter<'m> {
         }
         // Create a variable with the correct name and type from the SPMT var.
         let var = Rc::new(cuda::Variable {
-            name: spmt_var.name.as_deref().map(crate::transform_cuda::sanitize_name),
+            name: spmt_var.name.clone(),
             t: crate::transform_cuda::types::convert_type(&spmt_var.t),
             memory_qualifier: None,
         });
@@ -163,7 +163,13 @@ impl<'m> CudaFunctionConverter<'m> {
 /// Replace characters illegal in C++ identifiers.
 pub fn sanitize_name(name: &str) -> String {
     name.chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 

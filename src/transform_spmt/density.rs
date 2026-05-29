@@ -1127,7 +1127,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
 
                 let shifted_position = shift_vec;
 
-                let id = self.noise_inputs.len();
+                let id = self.builder_state.as_mut().unwrap().use_density_counter();
                 let cname = format!("{}_shiftb_{}", name, id);
                 let bs = self.builder_state.take().unwrap();
 

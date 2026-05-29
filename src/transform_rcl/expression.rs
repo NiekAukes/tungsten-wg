@@ -110,7 +110,7 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
                 let mut arguments = vec![];
                 let mut argument_types = vec![];
                 for (i, param) in parameters.iter().enumerate() {
-                    arguments.push(self.convert_argument(param, parameter_types[i]));
+                    arguments.push(self.convert_argument(param, parameter_types[i].clone()));
                     argument_types.push(types::convert_type(&parameter_types[i]));
                 }
 

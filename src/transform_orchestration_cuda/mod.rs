@@ -8,8 +8,6 @@ use crate::{
 };
 
 mod builders;
-mod output;
-mod permutation_tables;
 pub mod random;
 
 /// Generates a complete CUDA C++ source file containing a `CudaPipeline_{name}`
@@ -447,9 +445,11 @@ impl CudaOrchestrationCodegen {
                 let kernel_name = sanitize_name(&dep.shader.name);
                 let dep_name = shader_dep_name(dep);
 
+                let (os_x, os_y, os_z) = dep.scaled_origin.as_float();
+                let (ps_x, ps_y, ps_z) = dep.scaled_position.as_float();
                 write!(
                     self.code,
-                    "        {kernel_name}<<<num_blocks, BLOCK_SIZE>>>(\n            make_int3(0, 0, 0), grid_size, origin"
+                    "        {kernel_name}<<<num_blocks, BLOCK_SIZE>>>(\n            make_int3(0, 0, 0), grid_size, origin,\n            make_float3({os_x}, {os_y}, {os_z}),\n            make_float3({ps_x}, {ps_y}, {ps_z})"
                 )
                 .unwrap();
 
@@ -498,5 +498,17 @@ impl CudaOrchestrationCodegen {
 }
 
 fn shader_dep_name(dep: &ShaderDependency<'_>) -> String {
-    sanitize_name(&format!("{}_{}", dep.shader.name, dep.dimensions.flatten()))
+    sanitize_name(&format!(
+        "{}_d{}x{}x{}os{}x{}x{}ps{}x{}x{}",
+        dep.shader.name,
+        dep.dimensions.0,
+        dep.dimensions.1,
+        dep.dimensions.2,
+        dep.scaled_origin.as_int().0,
+        dep.scaled_origin.as_int().1,
+        dep.scaled_origin.as_int().2,
+        dep.scaled_position.as_int().0,
+        dep.scaled_position.as_int().1,
+        dep.scaled_position.as_int().2,
+    ))
 }
