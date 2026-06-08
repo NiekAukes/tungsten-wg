@@ -15,8 +15,8 @@ pub fn lower_normal_noise<'m>(
     noise: NormalNoise,
     permutation_name: &str,
     cname: String,
-    origin_scale: (f32, f32, f32),
-    position_scale: (f32, f32, f32),
+    origin_scale: (f64, f64, f64),
+    position_scale: (f64, f64, f64),
     as_density: bool,
 ) -> (Function<'m>, Vec<PermutationTableInput>) {
     let mut variables = Vec::new();

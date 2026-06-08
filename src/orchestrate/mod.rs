@@ -16,15 +16,15 @@ pub struct Scale {
 }
 
 impl Scale {
-    pub fn new(x: f32, y: f32, z: f32) -> Self {
+    pub fn new(x: f64, y: f64, z: f64) -> Self {
         // convert to fixed point with 16 bits of fractional precision
         Self {
             x: (x * 65565.0) as u32,
             y: (y * 65565.0) as u32,
             z: (z * 65565.0) as u32,
-            rx: x as f64,
-            ry: y as f64,
-            rz: z as f64,
+            rx: x,
+            ry: y,
+            rz: z,
         }
     }
 
@@ -66,6 +66,12 @@ impl From<(i32, i32, i32)> for Scale {
 
 impl From<(f32, f32, f32)> for Scale {
     fn from(value: (f32, f32, f32)) -> Self {
+        Self::new(value.0 as f64, value.1 as f64, value.2 as f64)
+    }
+}
+
+impl From<(f64, f64, f64)> for Scale {
+    fn from(value: (f64, f64, f64)) -> Self {
         Self::new(value.0, value.1, value.2)
     }
 }

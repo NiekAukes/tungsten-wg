@@ -4,7 +4,7 @@ use serde::de::value;
 
 use crate::parse::model::Density;
 use crate::spmt::model::DensityInput;
-use crate::transform_spmt::density::DensityBuilder;
+use crate::transform_spmt::density::{DensityBuilder, make_rpos3};
 use crate::transform_spmt::{newvar, prefixvar};
 use crate::{
     parse::model::{Spline, SplinePoint, SplineValue},
@@ -340,8 +340,8 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
 
         let old_function = self.switch_function(function);
 
-        let coord_input = self.lower_density(spline.coordinate);
-        let coord_expr = coord_input;
+        let coord_input = self.lower_density_input(spline.coordinate, None, None);
+        let coord_expr = Expression::DensityVariable(coord_input, None);
 
         self.add_statement(Statement::Assign {
             target: coordinate.clone(),
@@ -360,7 +360,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
 
         let r = self.build_spline_chain(&points, p, coordinate);
         let function_ref = self.finish_and_continue(r, old_function);
-        
+
         // Wrap the function call in an expression
         Expression::FunctionCall {
             function: function_ref,

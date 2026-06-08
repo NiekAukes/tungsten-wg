@@ -161,7 +161,7 @@ impl<'m> PrettyPrint for DensityFunction<'m> {
             for pt in &self.permutation_table_inputs {
                 match &pt.subident {
                     Some(sub) => p.line(&format!(
-                        "// - {}_{} [{}]",
+                        "// - {} {} [{}]",
                         pt.ident, sub, pt.subident_index
                     )),
                     None => p.line(&format!("// - {}", pt.ident)),

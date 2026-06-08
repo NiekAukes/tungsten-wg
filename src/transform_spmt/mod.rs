@@ -41,8 +41,8 @@ pub struct BuilderState<'a, 'm> {
     pub noise_cache: NoiseCache<'a, 'm>,
 
     working_dimensions: (i32, i32, i32),
-    working_scaled_position: (f32, f32, f32),
-    working_scaled_origin: (f32, f32, f32),
+    working_scaled_position: (f64, f64, f64),
+    working_scaled_origin: (f64, f64, f64),
 
     pub noise_settings: NoiseSettings,
     density_counter: usize,

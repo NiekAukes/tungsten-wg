@@ -49,8 +49,8 @@ pub type FunctionRef<'m> = Interned<'m, Function<'m>>;
 pub struct DensityInput<'m> {
     pub var: Var<'m>,
     pub density_function: DensityFunctionRef<'m>,
-    pub scaled_origin: (f32, f32, f32),
-    pub scaled_position: (f32, f32, f32),
+    pub scaled_origin: (f64, f64, f64),
+    pub scaled_position: (f64, f64, f64),
     pub dimensions: (i32, i32, i32),
 }
 
