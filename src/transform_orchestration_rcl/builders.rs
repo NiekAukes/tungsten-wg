@@ -201,9 +201,9 @@ pub fn make_shader_loop<'m>(
     let origin_scale_expr = Expression::LateBoundCall {
         function_name: "Vec3::new".to_string(),
         arguments: vec![
-            Expression::FloatLiteral(origin_scale_x as f64),
-            Expression::FloatLiteral(origin_scale_y as f64),
-            Expression::FloatLiteral(origin_scale_z as f64),
+            Expression::F64Literal(origin_scale_x as f64),
+            Expression::F64Literal(origin_scale_y as f64),
+            Expression::F64Literal(origin_scale_z as f64),
         ],
         argument_types: vec![Type::F64, Type::F64, Type::F64],
         return_type: Type::Struct("Vec3".to_string()),
@@ -212,9 +212,9 @@ pub fn make_shader_loop<'m>(
     let position_scale_expr = Expression::LateBoundCall {
         function_name: "Vec3::new".to_string(),
         arguments: vec![
-            Expression::FloatLiteral(position_scale_x as f64),
-            Expression::FloatLiteral(position_scale_y as f64),
-            Expression::FloatLiteral(position_scale_z as f64),
+            Expression::F64Literal(position_scale_x as f64),
+            Expression::F64Literal(position_scale_y as f64),
+            Expression::F64Literal(position_scale_z as f64),
         ],
         argument_types: vec![Type::F64, Type::F64, Type::F64],
         return_type: Type::Struct("Vec3".to_string()),

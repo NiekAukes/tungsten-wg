@@ -23,7 +23,8 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
 
                 rcl::Expression::Variable(rcl_var)
             }
-            spmt::Expression::Float(val) => rcl::Expression::FloatLiteral(*val),
+            spmt::Expression::Float(val) => rcl::Expression::F32Literal(*val),
+            spmt::Expression::Double(val) => rcl::Expression::F64Literal(*val),
             spmt::Expression::Int(val) => rcl::Expression::I32Literal(*val),
             spmt::Expression::Long(val) => rcl::Expression::I64Literal(*val),
             spmt::Expression::BinaryOp { op, left, right } => {
@@ -187,6 +188,9 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
                     spmt::VariableType::F32 => panic!(
                         "Cannot construct F32 directly, it should be a literal or a variable"
                     ),
+                    spmt::VariableType::F64 => panic!(
+                        "Cannot construct F64 directly, it should be a literal or a variable"
+                    ),
                     spmt::VariableType::I32 => panic!(
                         "Cannot construct I32 directly, it should be a literal or a variable"
                     ),
@@ -305,6 +309,25 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
                 },
             ),
             _ => (left_h, right_h), // No conversion needed or possible
+        }
+    }
+    pub fn convert_expression_to_type(
+        &mut self,
+        source: &spmt::Expression<'a>,
+        target_type: spmt::VariableType,
+    ) -> rcl::Expression<'m> {
+        let source_h = self.convert_expression(source);
+        let source_type = match try_derive_type(source) {
+            Some(t) => t,
+            None => return source_h, // If we can't derive the type, just convert without trying to match
+        };
+        if source_type == target_type {
+            source_h
+        } else {
+            rcl::Expression::Cast {
+                expr: Box::new(source_h),
+                to_type: convert_type(&target_type),
+            }
         }
     }
 }

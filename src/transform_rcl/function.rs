@@ -35,10 +35,7 @@ pub fn convert_function<'a, 'm>(
         .map(sanitize_name)
         .unwrap_or_else(|| format!("function_{}", spmt_func.addr() as usize));
     let func_name = format!("{}_{}", parent_density_name, func_name);
-    let mut rcl_func = rcl::Function::new(
-        Some(func_name),
-        convert_type(&spmt::VariableType::DensityInput),
-    );
+    let mut rcl_func = rcl::Function::new(Some(func_name), convert_type(&spmt_func.return_type));
 
     if let Some(cached) = converter.already_converted_functions.get(&spmt_func.addr()) {
         return (cached.clone(), converter, false);

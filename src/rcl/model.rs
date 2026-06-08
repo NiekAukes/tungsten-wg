@@ -218,7 +218,8 @@ pub enum Expression<'m> {
     // Literal values
     I32Literal(i32),
     I64Literal(i64),
-    FloatLiteral(f64),
+    F32Literal(f32),
+    F64Literal(f64),
     BoolLiteral(bool),
 
     // Binary operations

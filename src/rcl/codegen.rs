@@ -357,7 +357,8 @@ impl RustCodeGenerator {
             icl::Expression::Variable(var) => self.variable_to_string(var, p),
             icl::Expression::I32Literal(val) => format!("{}_i32", val),
             icl::Expression::I64Literal(val) => format!("{}_i64", val),
-            icl::Expression::FloatLiteral(val) => self.format_float_literal(*val),
+            icl::Expression::F32Literal(val) => self.format_f32_literal(*val),
+            icl::Expression::F64Literal(val) => self.format_f64_literal(*val),
             icl::Expression::BoolLiteral(val) => format!("{}", val),
             icl::Expression::BinaryOp { op, left, right } => {
                 format!(
@@ -566,7 +567,7 @@ impl RustCodeGenerator {
     }
 
     /// Format float literal with appropriate suffix
-    fn format_float_literal(&self, val: f64) -> String {
+    fn format_f64_literal(&self, val: f64) -> String {
         if val == f64::INFINITY {
             "f64::INFINITY".to_string()
         } else if val == f64::NEG_INFINITY {
@@ -575,6 +576,18 @@ impl RustCodeGenerator {
             "f64::NAN".to_string()
         } else {
             format!("{}_f64", val)
+        }
+    }
+
+    fn format_f32_literal(&self, val: f32) -> String {
+        if val == f32::INFINITY {
+            "f32::INFINITY".to_string()
+        } else if val == f32::NEG_INFINITY {
+            "f32::NEG_INFINITY".to_string()
+        } else if val.is_nan() {
+            "f32::NAN".to_string()
+        } else {
+            format!("{}_f32", val)
         }
     }
 }

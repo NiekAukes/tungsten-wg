@@ -6,6 +6,7 @@ pub fn try_derive_type<'a>(expr: &model::Expression<'a>) -> Option<model::Variab
     match expr {
         model::Expression::Variable(var) => Some(var.t.clone()),
         model::Expression::Float(_) => Some(model::VariableType::F32), // or F64 depending on precision
+        model::Expression::Double(_) => Some(model::VariableType::F64),
         model::Expression::Int(_) => Some(model::VariableType::I32),
         model::Expression::Long(_) => Some(model::VariableType::I64),
         model::Expression::BinaryOp { op, left, right } => {
@@ -15,7 +16,7 @@ pub fn try_derive_type<'a>(expr: &model::Expression<'a>) -> Option<model::Variab
         }
         model::Expression::UnaryOp { operand, .. } => try_derive_type(operand),
         model::Expression::Field { type_of_field, .. } => Some(type_of_field.clone()),
-        model::Expression::FunctionCall { .. } => None, // Could be derived from function signature if needed
+        model::Expression::FunctionCall { function, .. } => Some(function.return_type.clone()),
         model::Expression::ExternCall { .. } => None, // Could be derived from extern declaration if needed
         model::Expression::DensityVariable(_, _) => Some(model::VariableType::DensityInput),
         model::Expression::PermutationTable(_) => Some(model::VariableType::PermutationTable),

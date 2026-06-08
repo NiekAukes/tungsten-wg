@@ -12,7 +12,8 @@ pub fn convert_type(t: &spmt::VariableType) -> rcl::Type {
         spmt::VariableType::DensityInput => rcl::Type::F64,
         spmt::VariableType::Vec3 => rcl::Type::Struct("Vec3".to_string()),
         spmt::VariableType::Pos3 => rcl::Type::Struct("Pos3".to_string()),
-        spmt::VariableType::F32 => rcl::Type::F64,
+        spmt::VariableType::F32 => rcl::Type::F32,
+        spmt::VariableType::F64 => rcl::Type::F64,
         spmt::VariableType::I32 => rcl::Type::I32,
         spmt::VariableType::I64 => rcl::Type::I64,
         spmt::VariableType::PermutationTable => rcl::Type::Ref(Box::new(rcl::Type::Struct(

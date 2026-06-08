@@ -231,6 +231,7 @@ impl TypeCache {
         match t {
             spmt::VariableType::DensityInput => self.float_ty,
             spmt::VariableType::F32 => self.float_ty,
+            spmt::VariableType::F64 => self.float_ty,
             spmt::VariableType::Vec3 => self.vec3f_ty,
             spmt::VariableType::Pos3 => self.vec3u_ty,
             spmt::VariableType::I32 => self.u32_ty,

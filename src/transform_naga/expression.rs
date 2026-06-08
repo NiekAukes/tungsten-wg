@@ -130,12 +130,43 @@ impl<'m, 'a, 'b> ExprContext<'m, 'a, 'b> {
                         }) =>
                     {
                         // WGSL doesn't support f64 literals, so just use the max/min finite values for infinity to avoid validation errors.
+                        let fixed_val = if *val == f32::INFINITY {
+                            f64::MAX
+                        } else if *val == f32::NEG_INFINITY {
+                            f64::MIN
+                        } else {
+                            *val as f64
+                        };
+                        Literal::F64(fixed_val)
+                    }
+                    _ => {
+                        if *val == f32::INFINITY {
+                            Literal::F32(f32::MAX)
+                        } else if *val == f32::NEG_INFINITY {
+                            Literal::F32(f32::MIN)
+                        } else {
+                            Literal::F32(*val as f32)
+                        }
+                    }
+                };
+                self.append_and_emit(Expression::Literal(lit))
+            }
+
+            spmt::Expression::Double(val) => {
+                let lit = match self.type_cache.float_ty {
+                    ty if self.module.borrow().types[ty].inner
+                        == naga::TypeInner::Scalar(naga::Scalar {
+                            kind: naga::ScalarKind::Float,
+                            width: 8,
+                        }) =>
+                    {
+                        // WGSL doesn't support f64 literals, so just use the max/min finite values for infinity to avoid validation errors.
                         let fixed_val = if *val == f64::INFINITY {
                             f64::MAX
                         } else if *val == f64::NEG_INFINITY {
                             f64::MIN
                         } else {
-                            *val
+                            *val as f64
                         };
                         Literal::F64(fixed_val)
                     }
@@ -662,7 +693,8 @@ impl<'m, 'a, 'b> ExprContext<'m, 'a, 'b> {
     fn try_derive_type(&self, expr: &spmt::Expression<'a>) -> Option<spmt::VariableType> {
         match expr {
             spmt::Expression::Variable(var) => Some(var.t.clone()),
-            spmt::Expression::Float(_) => Some(spmt::VariableType::F32), // or F64 depending on precision
+            spmt::Expression::Float(_) => Some(spmt::VariableType::F32),
+            spmt::Expression::Double(_) => Some(spmt::VariableType::F64),
             spmt::Expression::Int(_) => Some(spmt::VariableType::I32),
             spmt::Expression::Long(_) => Some(spmt::VariableType::I64),
             spmt::Expression::BinaryOp { op, left, right } => {

@@ -9,7 +9,7 @@ pub mod noise;
 pub mod spline;
 
 fn lit(v: f64) -> Expression<'static> {
-    Expression::Float(v)
+    Expression::Float(v as f32)
 }
 
 pub fn newvar<'m>(arena: &'m bumpalo::Bump, name: &str, t: VariableType) -> Var<'m> {

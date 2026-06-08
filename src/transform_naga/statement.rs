@@ -31,7 +31,7 @@ pub fn convert_statement<'a>(stmt: &spmt::Statement<'a>, ctx: &mut ExprContext<'
                 let local_handle = ctx.func.as_mut().unwrap().local_variables.append(
                     naga::LocalVariable {
                         name: Some(super::types::sanitize_name(
-                            &ctx.converter.get_concrete_name(*target)
+                            &ctx.converter.get_concrete_name(*target),
                         )),
                         ty: naga_ty,
                         init: None,
@@ -278,10 +278,12 @@ pub fn convert_density_return_statement<'a>(
     // Get the global variable handle for the output buffer
 
     // Access dimensions from the params struct (member index 1)
-    let params_ptr = ctx.func.as_mut().unwrap().expressions.append(
-        Expression::GlobalVariable(params_handle),
-        Span::UNDEFINED,
-    );
+    let params_ptr = ctx
+        .func
+        .as_mut()
+        .unwrap()
+        .expressions
+        .append(Expression::GlobalVariable(params_handle), Span::UNDEFINED);
     let dim_ptr = ctx.append_and_emit(Expression::AccessIndex {
         base: params_ptr,
         index: 1, // dimensions is at member index 1

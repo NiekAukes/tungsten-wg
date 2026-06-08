@@ -19,7 +19,8 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
         match stmt {
             spmt::Statement::Assign { target, value } => {
                 let target_var = self.get_or_create_variable(target.clone());
-                let value_expr = self.convert_expression(value);
+                //let value_expr = self.convert_expression(value);
+                let value_expr = self.convert_expression_to_type(value, target.t.clone());
                 rcl::Statement::Assign {
                     target: target_var,
                     value: value_expr,

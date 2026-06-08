@@ -40,6 +40,7 @@ pub struct Function<'m> {
     pub parameters: Vec<Var<'m>>,
     pub body: Vec<Statement<'m>>,
     pub variables: Vec<Var<'m>>,
+    pub return_type: VariableType,
 }
 
 pub type DensityFunctionRef<'m> = Interned<'m, DensityFunction<'m>>;
@@ -81,6 +82,7 @@ pub enum VariableType {
     Vec3,
     Pos3,
     F32,
+    F64,
     I32,
     I64,
     Bool,
@@ -96,6 +98,7 @@ impl Debug for VariableType {
             VariableType::Vec3 => write!(f, "vec3"),
             VariableType::Pos3 => write!(f, "pos3"),
             VariableType::F32 => write!(f, "f32"),
+            VariableType::F64 => write!(f, "f64"),
             VariableType::I32 => write!(f, "i32"),
             VariableType::I64 => write!(f, "i64"),
             VariableType::Extern(name) => write!(f, "{}", name),
@@ -135,7 +138,8 @@ pub enum Expression<'m> {
     /// A variable reference
     Variable(Var<'m>),
     /// A literal value (e.g. number)
-    Float(f64),
+    Float(f32),
+    Double(f64),
     Int(i32),
     Long(i64),
     /// A Function call: function(parameters...)

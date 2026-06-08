@@ -49,7 +49,7 @@ pub fn lower_normal_noise<'m>(
             value: Expression::BinaryOp {
                 op: BinaryOperator::Multiply,
                 left: Box::new(Expression::Variable(rpos3.clone())),
-                right: Box::new(Expression::Float(*freq)),
+                right: Box::new(Expression::Double(*freq)),
             },
         });
         rpos3fxs.push(rpos3f.clone());
@@ -62,7 +62,7 @@ pub fn lower_normal_noise<'m>(
     let mut noise_terms = Vec::new();
     let mut permutation_table_inputs = Vec::new();
     for (i, (_, amp, octave_id)) in frequencies.iter().enumerate() {
-        let n = newvar(arena, &format!("n{}", octave_id), VariableType::F32);
+        let n = newvar(arena, &format!("n{}", octave_id), VariableType::F64);
 
         // let noise_ident = random::xoroshiro_seed(&cname);
         // let perlin_ident = random::xoroshiro_seed(&format!("octave_{}", octave_id));
@@ -88,7 +88,7 @@ pub fn lower_normal_noise<'m>(
         let scaled_rpos3f = Expression::BinaryOp {
             op: BinaryOperator::Multiply,
             left: Box::new(Expression::Variable(rpos3fxs[i].clone())),
-            right: Box::new(Expression::Float(DOUBLE_PERLIN_OFFSET)),
+            right: Box::new(Expression::Double(DOUBLE_PERLIN_OFFSET)),
         };
         let perlin2 = Expression::ExternCall {
             function_name: "perlin".into(),
@@ -103,7 +103,7 @@ pub fn lower_normal_noise<'m>(
         let scaled_noise = Expression::BinaryOp {
             op: BinaryOperator::Multiply,
             left: Box::new(noise_sum),
-            right: Box::new(Expression::Float(*amp)),
+            right: Box::new(Expression::Double(*amp)),
         };
         body.push(Statement::Assign {
             target: n.clone(),
@@ -126,7 +126,7 @@ pub fn lower_normal_noise<'m>(
     let final_sum = Expression::BinaryOp {
         op: BinaryOperator::Multiply,
         left: Box::new(sum),
-        right: Box::new(Expression::Float(normal_amplitude)),
+        right: Box::new(Expression::Double(normal_amplitude)),
     };
     body.push(Statement::Return(final_sum));
 
@@ -138,6 +138,7 @@ pub fn lower_normal_noise<'m>(
             parameters: vec![rpos3],
             body,
             variables,
+            return_type: VariableType::F64,
         },
         permutation_table_inputs,
     )

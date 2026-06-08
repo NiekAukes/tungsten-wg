@@ -327,6 +327,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
             parameters: Vec::new(),
             body: Vec::new(),
             variables: Vec::new(),
+            return_type: VariableType::F32,
         };
         let p: Var<'m> = Var::new(self.arena.alloc(Variable {
             name: self.p.name.clone(),
@@ -383,7 +384,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         let cond = Expression::BinaryOp {
             op: BinaryOperator::Less,
             left: Box::new(Expression::Variable(input.clone())),
-            right: Box::new(Expression::Float(first.location)),
+            right: Box::new(Expression::Float(first.location as f32)),
         };
         let mut then_branch = Vec::new();
         then_branch.push(Statement::Return(initial_extrapolation));
@@ -414,7 +415,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         let cond = Expression::BinaryOp {
             op: BinaryOperator::Less,
             left: Box::new(Expression::Variable(input.clone())),
-            right: Box::new(Expression::Float(second.location)),
+            right: Box::new(Expression::Float(second.location as f32)),
         };
 
         let mut then_branch = Vec::new();
@@ -431,7 +432,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
 
     fn lower_spline_value_expr(&mut self, value: &SplineValue<'a>, p: Var<'m>) -> Expression<'m> {
         match value {
-            SplineValue::Const(c) => Expression::Float(*c),
+            SplineValue::Const(c) => Expression::Float(*c as f32),
 
             SplineValue::Spline(def) => {
                 // recursive spline -> generate nested function call
@@ -455,9 +456,9 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                 left: Box::new(Expression::BinaryOp {
                     op: BinaryOperator::Subtract,
                     left: Box::new(Expression::Variable(input.clone())),
-                    right: Box::new(Expression::Float(point.location)),
+                    right: Box::new(Expression::Float(point.location as f32)),
                 }),
-                right: Box::new(Expression::Float(point.derivative)),
+                right: Box::new(Expression::Float(point.derivative as f32)),
             }),
             right: Box::new(self.lower_spline_value_expr(&point.value, p)),
         }
@@ -470,17 +471,32 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         p: Var<'m>,
         input: Var<'m>,
     ) -> Statement<'m> {
+        /*
+        let h_minus_g = -0.15_f32 - -0.19_f32;
+        let t = (coordinate - -0.19_f32) / h_minus_g;
+
+        return hermite(
+            t,
+            3.95_f32,
+            minecraft_factor_test_function_129124268986176(pos3, /* ... */) as f32,
+            0.0_f32,
+            0.0_f32,
+            h_minus_g
+        );
+         */
+        let h_minus_g = second.location as f32 - first.location as f32;
+        let h_minus_g_expr = Expression::Float(h_minus_g);
         let t = Expression::BinaryOp {
             op: BinaryOperator::Divide,
             left: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Subtract,
                 left: Box::new(Expression::Variable(input.clone())),
-                right: Box::new(Expression::Float(first.location)),
+                right: Box::new(Expression::Float(first.location as f32)),
             }),
             right: Box::new(Expression::BinaryOp {
                 op: BinaryOperator::Subtract,
-                left: Box::new(Expression::Float(second.location)),
-                right: Box::new(Expression::Float(first.location)),
+                left: Box::new(Expression::Float(second.location as f32)),
+                right: Box::new(Expression::Float(first.location as f32)),
             }),
         };
 
@@ -493,10 +509,12 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                 t,
                 f,
                 s,
-                Expression::Float(first.derivative),
-                Expression::Float(second.derivative),
+                Expression::Float(first.derivative as f32),
+                Expression::Float(second.derivative as f32),
+                h_minus_g_expr,
             ],
             parameter_types: vec![
+                VariableType::F32,
                 VariableType::F32,
                 VariableType::F32,
                 VariableType::F32,
@@ -893,7 +911,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                             "next_decision_index",
                             Expression::Int(*next_decision_idx as i32),
                         ),
-                        ("location", Expression::Float(*location)),
+                        ("location", Expression::Float(*location as f32)),
                     ],
                 },
             )
@@ -908,8 +926,8 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
             .map(|(value, derivative)| Expression::ConstructExtern {
                 t: VariableType::Extern("SplineValue"),
                 args: vec![
-                    ("value", Expression::Float(*value)),
-                    ("derivative", Expression::Float(*derivative)),
+                    ("value", Expression::Float(*value as f32)),
+                    ("derivative", Expression::Float(*derivative as f32)),
                 ],
             })
             .collect();

@@ -17,7 +17,8 @@ impl<'a, 'm> CudaFunctionConverter<'m> {
                 cuda::Expression::Variable(cuda_var)
             }
 
-            spmt::Expression::Float(val) => cuda::Expression::F64Literal(*val as f64),
+            spmt::Expression::Float(val) => cuda::Expression::F32Literal(*val),
+            spmt::Expression::Double(val) => cuda::Expression::F64Literal(*val),
             spmt::Expression::Int(val) => cuda::Expression::I32Literal(*val),
             spmt::Expression::Long(val) => cuda::Expression::I64Literal(*val),
 

@@ -280,6 +280,11 @@ impl<'m> PrettyPrint for Expression<'m> {
                 let s = s.trim_end_matches('0').trim_end_matches('.').to_string();
                 p.push(&s);
             }
+            Expression::Double(v) => {
+                let s = format!("{:.4}", v);
+                let s = s.trim_end_matches('0').trim_end_matches('.').to_string();
+                p.push(&s);
+            }
             Expression::Int(v) => {
                 write!(p.line, "{}", v).unwrap();
             }

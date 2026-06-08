@@ -11,6 +11,7 @@ pub fn convert_type(t: &spmt::VariableType) -> cuda::Type {
         // Density values use double precision on the device.
         spmt::VariableType::DensityInput => cuda::Type::Float,
         spmt::VariableType::F32 => cuda::Type::Float,
+        spmt::VariableType::F64 => cuda::Type::Double,
         spmt::VariableType::I32 => cuda::Type::Int32,
         spmt::VariableType::I64 => cuda::Type::Int64,
         // CUDA built-in vector types.
