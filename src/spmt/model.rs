@@ -56,10 +56,13 @@ pub struct DensityInput<'m> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct PermutationTableInput {
-    pub ident: String,
-    pub subident: Option<String>,
-    pub subident_index: usize,
+pub enum PermutationTableInput {
+    PerlinNoise {
+        ident: String,
+        subident: Option<String>,
+        subident_index: usize,
+    },
+    Base3DNoise,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,6 +82,7 @@ pub enum Name {
 pub enum VariableType {
     DensityInput,
     PermutationTable,
+    InterpolatedNoiseSampler,
     Vec3,
     Pos3,
     F32,
@@ -95,6 +99,7 @@ impl Debug for VariableType {
         match self {
             VariableType::DensityInput => write!(f, "density"),
             VariableType::PermutationTable => write!(f, "perm_table"),
+            VariableType::InterpolatedNoiseSampler => write!(f, "interpolated_noise_sampler"),
             VariableType::Vec3 => write!(f, "vec3"),
             VariableType::Pos3 => write!(f, "pos3"),
             VariableType::F32 => write!(f, "f32"),

@@ -15,7 +15,8 @@ use crate::{
         Variable, VariableType,
     },
     transform_spmt::{
-        BuilderState, DensityFunctionCache, NoiseCache, anonvar, newvar, noise::lower_normal_noise,
+        BuilderState, DensityFunctionCache, NoiseCache, anonvar, newvar,
+        noise::{lower_normal_noise, lower_old_blended_noise},
         prefixvar,
     },
 };
@@ -219,15 +220,23 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         );
         // add the permutation tables to the function arguments
         for perm_table in &perm_tables {
+            let param_name = match perm_table {
+                PermutationTableInput::PerlinNoise {
+                    ident,
+                    subident,
+                    subident_index,
+                } => format!(
+                    "perm_table_{}_{}_{}",
+                    ident,
+                    subident_index,
+                    subident.as_ref().unwrap_or(&"".to_string())
+                ),
+                PermutationTableInput::Base3DNoise => "base3d_perm_table".to_string(),
+            };
             function
                 .parameters
                 .push(Var::new(self.arena.alloc(Variable {
-                    name: Name::Named(format!(
-                        "perm_table_{}_{}_{}",
-                        perm_table.ident,
-                        perm_table.subident_index,
-                        perm_table.subident.as_ref().unwrap_or(&"".to_string())
-                    )),
+                    name: Name::Named(param_name),
                     t: VariableType::PermutationTable,
                 })));
         }
@@ -552,7 +561,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                 // use the density input as the expression
                 Expression::DensityVariable(fref, None)
             }
-            DensityType::Const(v) => Expression::Double(trunc(v)),
+            DensityType::Const(v) => Expression::Double(v),
             DensityType::Add { left, right } => {
                 let left = self.lower_density(left);
                 let right = self.lower_density(right);
@@ -571,10 +580,79 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                     right: Box::new(right),
                 }
             }
+            // DensityType::Cache2d { argument } => {
+            //     // do nothing for now, just lower the argument
+            //     // eventually we might want to mark this as a special function call, so that we can do some caching later on
+            //     self.lower_density(argument)
+            // }
             DensityType::Cache2d { argument } => {
-                // do nothing for now, just lower the argument
-                // eventually we might want to mark this as a special function call, so that we can do some caching later on
-                self.lower_density(argument)
+                if self
+                    .builder_state
+                    .as_ref()
+                    .unwrap()
+                    .known_y_sample_point
+                    .is_none()
+                {
+                    panic!("Cache2d is not supported in this context");
+                }
+
+                // Check if we've already cached this specific 2D evaluation
+                if let Some(cached) = self.get_function_cached_density_input(&density) {
+                    return Expression::DensityVariable(
+                        cached.clone(),
+                        // Index by the local 2D column rather than a biome cell
+                        Some(Box::new(Expression::ExternCall {
+                            function_name: "flat_y_zero_index".into(),
+                            parameters: vec![
+                                Expression::Variable(self.p.clone()),
+                                Expression::Int(
+                                    self.builder_state.as_ref().unwrap().working_dimensions.0,
+                                ),
+                                Expression::Int(
+                                    self.builder_state.as_ref().unwrap().working_dimensions.2,
+                                ),
+                            ],
+                            parameter_types: vec![
+                                VariableType::Pos3,
+                                VariableType::I32,
+                                VariableType::I32,
+                            ],
+                        })),
+                    );
+                }
+
+                // Edge case: Consts don't need caching
+                if let DensityType::Const(_) = *argument {
+                    return self.lower_density(argument);
+                }
+
+                // Lower the argument so it generates the function logic
+                let input = self.lower_density_input(argument, None, None);
+
+                // Add it to your cache registry so the runtime knows to allocate a 2D array for it
+                self.add_density_input_to_cache(density, input.clone());
+
+                // Return the density variable indexed by the 2D column
+                Expression::DensityVariable(
+                    input,
+                    Some(Box::new(Expression::ExternCall {
+                        function_name: "flat_y_zero_index".into(),
+                        parameters: vec![
+                            Expression::Variable(self.p.clone()),
+                            Expression::Int(
+                                self.builder_state.as_ref().unwrap().working_dimensions.0,
+                            ),
+                            Expression::Int(
+                                self.builder_state.as_ref().unwrap().working_dimensions.2,
+                            ),
+                        ],
+                        parameter_types: vec![
+                            VariableType::Pos3,
+                            VariableType::I32,
+                            VariableType::I32,
+                        ],
+                    })),
+                )
             }
             DensityType::Squeeze { argument } => {
                 /*
@@ -594,16 +672,20 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                     left: Box::new(Expression::BinaryOp {
                         op: BinaryOperator::Multiply,
                         left: Box::new(Expression::Variable(xv.clone())),
-                        right: Box::new(Expression::Double(trunc(0.5))),
+                        right: Box::new(Expression::Double(0.5)),
                     }),
                     right: Box::new(Expression::BinaryOp {
                         op: BinaryOperator::Multiply,
                         left: Box::new(Expression::BinaryOp {
                             op: BinaryOperator::Multiply,
-                            left: Box::new(Expression::Variable(xv.clone())),
+                            left: Box::new(Expression::BinaryOp {
+                                op: BinaryOperator::Multiply,
+                                left: Box::new(Expression::Variable(xv.clone())),
+                                right: Box::new(Expression::Variable(xv.clone())),
+                            }),
                             right: Box::new(Expression::Variable(xv.clone())),
                         }),
-                        right: Box::new(Expression::Double(trunc(1.0 / 24.0))),
+                        right: Box::new(Expression::Double(1.0 / 24.0)),
                     }),
                 };
                 let result_var = anonvar(self.arena, VariableType::F64);
@@ -737,19 +819,48 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                     ],
                 }
             }
-            DensityType::CacheOnce { argument } => {
+            DensityType::FlatCache { argument } => {
                 // a caching function. It evaluates the density function only once per biome column.
                 // which is x >> 2, z >> 2. Y is ignored. The result is cached and reused for every point in the same biome column.
                 // This is used for biome-specific features like ore veins and surface structures, which only depend
                 if let Some(cached) = self.get_function_cached_density_input(&density) {
-                    return Expression::DensityVariable(
-                        cached.clone(),
-                        Some(Box::new(Expression::ExternCall {
-                            function_name: "biome_column_index".into(),
-                            parameters: vec![Expression::Variable(self.p.clone())],
-                            parameter_types: vec![VariableType::Pos3],
-                        })),
-                    );
+                    // return the density variable for the input, with an index of (x >> 2, z >> 2)
+                    // whether to use biome column index or identity depends on the working dimensions. If the xz dimensions are 1, then we are already effectively indexed by biome column, so we can just return the cached value directly. Otherwise, we need to index it by biome column.
+                    if self.builder_state.as_ref().unwrap().working_dimensions.0 == 5
+                        && self.builder_state.as_ref().unwrap().working_dimensions.1 == 1
+                        && self.builder_state.as_ref().unwrap().working_dimensions.2 == 5
+                    {
+                        return Expression::DensityVariable(cached.clone(), None);
+                    } else if self.builder_state.as_ref().unwrap().working_dimensions.0 == 5
+                        && self.builder_state.as_ref().unwrap().working_dimensions.2 == 5
+                    {
+                        // flat_y_zero_index
+                        return Expression::DensityVariable(
+                            cached.clone(),
+                            Some(Box::new(Expression::ExternCall {
+                                function_name: "flat_y_zero_index".into(),
+                                parameters: vec![
+                                    Expression::Variable(self.p.clone()),
+                                    Expression::Int(5),
+                                    Expression::Int(5),
+                                ],
+                                parameter_types: vec![
+                                    VariableType::Pos3,
+                                    VariableType::I32,
+                                    VariableType::I32,
+                                ],
+                            })),
+                        );
+                    } else {
+                        return Expression::DensityVariable(
+                            cached.clone(),
+                            Some(Box::new(Expression::ExternCall {
+                                function_name: "biome_column_index".into(),
+                                parameters: vec![Expression::Variable(self.p.clone())],
+                                parameter_types: vec![VariableType::Pos3],
+                            })),
+                        );
+                    }
                 }
 
                 // Edge case: Usually used on BlendAlpha, which we do not provide.
@@ -763,23 +874,23 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                 let mut bs = self.builder_state.take().unwrap();
                 let old_dimensions = bs.working_dimensions;
                 let dimensions = (
-                    1.max(old_dimensions.0 / 4),
-                    old_dimensions.1,
-                    1.max(old_dimensions.2 / 4),
+                    bs.original_dimensions.0 / 4 + 1,
+                    1,
+                    bs.original_dimensions.2 / 4 + 1,
                 );
                 let old_scaled_position = bs.working_scaled_position;
                 let old_scaled_origin = bs.working_scaled_origin;
 
                 bs.working_dimensions = dimensions;
                 bs.working_scaled_position = (
-                    old_scaled_position.0 * 4.0,
+                    bs.original_scaled_position.0 * 4.0,
                     0.0, // doesn't matter
-                    old_scaled_position.2 * 4.0,
+                    bs.original_scaled_position.2 * 4.0,
                 );
                 bs.working_scaled_origin = (old_scaled_origin.0, 0.0, old_scaled_origin.2);
+                bs.known_y_sample_point = Some(0); // y is set to 0
                 self.builder_state = Some(bs);
 
-                // flat caches are always lowered as separate density functions
                 let input = self.lower_density_input(argument, None, None);
                 // add to cache
                 self.add_density_input_to_cache(density, input.clone());
@@ -791,14 +902,42 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                 self.builder_state = Some(bs);
 
                 // return the density variable for the input, with an index of (x >> 2, z >> 2)
-                Expression::DensityVariable(
-                    input,
-                    Some(Box::new(Expression::ExternCall {
-                        function_name: "biome_column_index".into(),
-                        parameters: vec![Expression::Variable(self.p.clone())],
-                        parameter_types: vec![VariableType::Pos3],
-                    })),
-                )
+                // whether to use biome column index or identity depends on the working dimensions. If the xz dimensions are 1, then we are already effectively indexed by biome column, so we can just return the cached value directly. Otherwise, we need to index it by biome column.
+                if self.builder_state.as_ref().unwrap().working_dimensions.0 == 5
+                    && self.builder_state.as_ref().unwrap().working_dimensions.1 == 1
+                    && self.builder_state.as_ref().unwrap().working_dimensions.2 == 5
+                {
+                    return Expression::DensityVariable(input, None);
+                } else if self.builder_state.as_ref().unwrap().working_dimensions.0 == 5
+                    && self.builder_state.as_ref().unwrap().working_dimensions.2 == 5
+                {
+                    // flat_y_zero_index
+                    return Expression::DensityVariable(
+                        input,
+                        Some(Box::new(Expression::ExternCall {
+                            function_name: "flat_y_zero_index".into(),
+                            parameters: vec![
+                                Expression::Variable(self.p.clone()),
+                                Expression::Int(5),
+                                Expression::Int(5),
+                            ],
+                            parameter_types: vec![
+                                VariableType::Pos3,
+                                VariableType::I32,
+                                VariableType::I32,
+                            ],
+                        })),
+                    );
+                } else {
+                    return Expression::DensityVariable(
+                        input,
+                        Some(Box::new(Expression::ExternCall {
+                            function_name: "biome_column_index".into(),
+                            parameters: vec![Expression::Variable(self.p.clone())],
+                            parameter_types: vec![VariableType::Pos3],
+                        })),
+                    );
+                }
             }
             DensityType::EndIslands => {
                 // this is a special density function that doesn't take any arguments, it just marks the end of island generation
@@ -826,9 +965,9 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                     left: Box::new(Expression::BinaryOp {
                         op: BinaryOperator::Subtract,
                         left: Box::new(y_expr),
-                        right: Box::new(Expression::Double(trunc(from_y))),
+                        right: Box::new(Expression::Double((from_y))),
                     }),
-                    right: Box::new(Expression::Double(trunc(to_y - from_y))),
+                    right: Box::new(Expression::Double((to_y - from_y))),
                 };
 
                 // 2. clamp(p.y, from_y, to_y)
@@ -855,17 +994,16 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                     left: Box::new(Expression::BinaryOp {
                         op: BinaryOperator::Multiply,
                         left: Box::new(Expression::Variable(clamped_y.clone())),
-                        right: Box::new(Expression::Double(trunc(to_value - from_value))),
+                        right: Box::new(Expression::Double((to_value - from_value))),
                     }),
-                    right: Box::new(Expression::Double(trunc(from_value))),
+                    right: Box::new(Expression::Double((from_value))),
                 }
             }
-            DensityType::FlatCache { argument } => {
+            DensityType::CacheOnce { argument } => {
                 if let Some(cached) = self.get_function_cached_density_input(&density) {
                     return Expression::DensityVariable(cached.clone(), None);
                 }
 
-                // flat caches are always lowered as separate density functions
                 let input = self.lower_density_input(argument, None, None);
                 // add to cache
                 self.add_density_input_to_cache(density, input.clone());
@@ -881,7 +1019,6 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                     return Expression::DensityVariable(cached.clone(), None);
                 }
                 let name = format!("{}", name,);
-                // flat caches are always lowered as separate density functions
                 let input = self.lower_density_input(argument, Some(name), None);
                 // return the density variable for the input
                 Expression::DensityVariable(input, None)
@@ -897,27 +1034,18 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                 y_factor,
                 y_scale,
             } => {
-                // old noise function, used in 1.18 and earlier
-                // for now call an extern function by the same name
-                Expression::ExternCall {
-                    function_name: "old_blended_noise".into(),
-                    parameters: vec![
-                        Expression::Variable(self.rpos3.clone()),
-                        Expression::Double(trunc(smear_scale_multiplier)),
-                        Expression::Double(trunc(xz_factor)),
-                        Expression::Double(trunc(xz_scale)),
-                        Expression::Double(trunc(y_factor)),
-                        Expression::Double(trunc(y_scale)),
-                    ],
-                    parameter_types: vec![
-                        VariableType::Vec3,
-                        VariableType::F64,
-                        VariableType::F64,
-                        VariableType::F64,
-                        VariableType::F64,
-                        VariableType::F64,
-                    ],
-                }
+                let (expr, perm_table) = lower_old_blended_noise(
+                    self.rpos3.clone(),
+                    (smear_scale_multiplier),
+                    (xz_factor),
+                    (xz_scale),
+                    (y_factor),
+                    (y_scale),
+                );
+                self.density_function
+                    .permutation_table_inputs
+                    .push(perm_table);
+                expr
             }
             DensityType::ShiftedNoise { .. } => {
                 // 0. initiate caching
@@ -1033,7 +1161,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                         type_of_field: VariableType::F64,
                         known_idnex: None,
                     }),
-                    right: Box::new(Expression::Double(trunc(4.0))),
+                    right: Box::new(Expression::Double((4.0))),
                 };
                 let z_shift = Expression::BinaryOp {
                     op: BinaryOperator::Divide,
@@ -1043,7 +1171,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                         type_of_field: VariableType::F64,
                         known_idnex: None,
                     }),
-                    right: Box::new(Expression::Double(trunc(4.0))),
+                    right: Box::new(Expression::Double((4.0))),
                 };
                 let shift_vec = Expression::Construct {
                     t: VariableType::Pos3,
@@ -1105,7 +1233,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                 Expression::BinaryOp {
                     op: BinaryOperator::Multiply,
                     left: Box::new(call),
-                    right: Box::new(Expression::Double(trunc(4.0))),
+                    right: Box::new(Expression::Double((4.0))),
                 }
             }
             DensityType::ShiftB { argument, ref name } => {
@@ -1121,7 +1249,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                                 type_of_field: VariableType::F64,
                                 known_idnex: None,
                             }),
-                            right: Box::new(Expression::Double(trunc(4.0))),
+                            right: Box::new(Expression::Double((4.0))),
                         },
                         Expression::BinaryOp {
                             op: BinaryOperator::Divide,
@@ -1131,7 +1259,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                                 type_of_field: VariableType::F64,
                                 known_idnex: None,
                             }),
-                            right: Box::new(Expression::Double(trunc(4.0))),
+                            right: Box::new(Expression::Double((4.0))),
                         },
                         Expression::Double(0.0),
                     ],
@@ -1192,7 +1320,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                 Expression::BinaryOp {
                     op: BinaryOperator::Multiply,
                     left: Box::new(call),
-                    right: Box::new(Expression::Double(trunc(4.0))),
+                    right: Box::new(Expression::Double((4.0))),
                 }
             }
 
@@ -1258,12 +1386,12 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                     left: Box::new(Expression::BinaryOp {
                         op: BinaryOperator::GreaterEqual,
                         left: Box::new(Expression::Variable(v.clone())),
-                        right: Box::new(Expression::Double(trunc(min_inclusive))),
+                        right: Box::new(Expression::Double(min_inclusive)),
                     }),
                     right: Box::new(Expression::BinaryOp {
                         op: BinaryOperator::Less,
                         left: Box::new(Expression::Variable(v.clone())),
-                        right: Box::new(Expression::Double(trunc(max_exclusive))),
+                        right: Box::new(Expression::Double(max_exclusive)),
                     }),
                 };
 
@@ -1311,7 +1439,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                         value: Expression::BinaryOp {
                             op: BinaryOperator::Multiply,
                             left: Box::new(Expression::Variable(v.clone())),
-                            right: Box::new(Expression::Double(trunc(neg_multiplier))),
+                            right: Box::new(Expression::Double((neg_multiplier))),
                         },
                     }],
                     else_branch: vec![Statement::Assign {
@@ -1478,11 +1606,7 @@ pub fn make_clamp(input: Expression, min: f64, max: f64) -> Expression {
     // }
     Expression::ExternCall {
         function_name: "clamp".into(),
-        parameters: vec![
-            input,
-            Expression::Double(trunc(min)),
-            Expression::Double(trunc(max)),
-        ],
+        parameters: vec![input, Expression::Double((min)), Expression::Double((max))],
         parameter_types: vec![VariableType::F64, VariableType::F64, VariableType::F64],
     }
 }

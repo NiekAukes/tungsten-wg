@@ -1,8 +1,9 @@
 use std::fmt::Write;
 
 use crate::spmt::model::{
-    Addr, BinaryOperator, DensityFunction, Expression, Function, SPMT, Statement, UnaryOperator,
-    Var,
+    Addr, BinaryOperator, DensityFunction,
+    Expression::{self, PermutationTable},
+    Function, PermutationTableInput, SPMT, Statement, UnaryOperator, Var,
 };
 
 const INDENT: &str = "    ";
@@ -159,12 +160,20 @@ impl<'m> PrettyPrint for DensityFunction<'m> {
         if !self.permutation_table_inputs.is_empty() {
             p.line("// permutation table inputs:");
             for pt in &self.permutation_table_inputs {
-                match &pt.subident {
-                    Some(sub) => p.line(&format!(
-                        "// - {} {} [{}]",
-                        pt.ident, sub, pt.subident_index
-                    )),
-                    None => p.line(&format!("// - {}", pt.ident)),
+                match pt {
+                    PermutationTableInput::PerlinNoise {
+                        ident,
+                        subident,
+                        subident_index,
+                    } => match subident {
+                        Some(sub) => {
+                            p.line(&format!("// - {} {} [{}]", ident, sub, subident_index))
+                        }
+                        None => p.line(&format!("// - {}", ident)),
+                    },
+                    PermutationTableInput::Base3DNoise => {
+                        p.line("// - base 3D noise");
+                    }
                 }
             }
         }
@@ -358,13 +367,18 @@ impl<'m> PrettyPrint for Expression<'m> {
                 }
             }
             Expression::PermutationTable(perm_table_input) => {
-                let name = match &perm_table_input.subident {
-                    Some(sub) => format!(
-                        "perm-table-{}_{}[{}]",
-                        perm_table_input.ident, sub, perm_table_input.subident_index
-                    ),
-                    None => format!("perm-table-{}", perm_table_input.ident),
+                let name = match &perm_table_input {
+                    PermutationTableInput::PerlinNoise {
+                        ident,
+                        subident,
+                        subident_index,
+                    } => match subident {
+                        Some(sub) => format!("perm-table-{}_{}[{}]", ident, sub, subident_index),
+                        None => format!("perm-table-{}", ident),
+                    },
+                    PermutationTableInput::Base3DNoise => "base-3d-noise".to_string(),
                 };
+
                 p.push(&name);
             }
             Expression::UnaryOp { op, operand } => {

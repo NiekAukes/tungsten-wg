@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::{
     parse::model::NormalNoise,
     spmt::model::{
@@ -66,12 +68,12 @@ pub fn lower_normal_noise<'m>(
 
         // let noise_ident = random::xoroshiro_seed(&cname);
         // let perlin_ident = random::xoroshiro_seed(&format!("octave_{}", octave_id));
-        let perm1 = PermutationTableInput {
+        let perm1 = PermutationTableInput::PerlinNoise {
             ident: permutation_name.to_string(),
             subident: Some(format!("octave_{}", octave_id)),
             subident_index: 0,
         };
-        let perm2 = PermutationTableInput {
+        let perm2 = PermutationTableInput::PerlinNoise {
             ident: permutation_name.to_string(),
             subident: Some(format!("octave_{}", octave_id)),
             subident_index: 1,
@@ -225,4 +227,41 @@ fn create_amplitude(octaves: i32) -> f64 {
 
 fn calc_persistence(amplitudes_count: i32) -> f64 {
     (2.0f64.powi(amplitudes_count - 1)) / (2.0f64.powi(amplitudes_count) - 1.0)
+}
+
+// =============================
+// Old Blended Noise
+// =============================
+
+pub fn lower_old_blended_noise<'m>(
+    rpos3: Var<'m>,
+    smear_scale_multiplier: f64,
+    xz_factor: f64,
+    xz_scale: f64,
+    y_factor: f64,
+    y_scale: f64,
+) -> (Expression<'m>, PermutationTableInput) {
+    let perm_table_input = PermutationTableInput::Base3DNoise;
+    let perlin_call = Expression::ExternCall {
+        function_name: "base3d_noise".into(),
+        parameters: vec![
+            Expression::Variable(rpos3),
+            Expression::PermutationTable(perm_table_input.clone()),
+            Expression::Double(smear_scale_multiplier),
+            Expression::Double(xz_factor),
+            Expression::Double(xz_scale),
+            Expression::Double(y_factor),
+            Expression::Double(y_scale),
+        ],
+        parameter_types: vec![
+            VariableType::Vec3,
+            VariableType::PermutationTable,
+            VariableType::F64,
+            VariableType::F64,
+            VariableType::F64,
+            VariableType::F64,
+            VariableType::F64,
+        ],
+    };
+    (perlin_call, perm_table_input)
 }

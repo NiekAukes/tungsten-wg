@@ -199,6 +199,7 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
                     ),
                     spmt::VariableType::DensityInput => "DensityInput",
                     spmt::VariableType::PermutationTable => "PermutationTable",
+                    spmt::VariableType::InterpolatedNoiseSampler => "InterpolatedNoiseSampler",
                     spmt::VariableType::Extern(s) => s,
                     spmt::VariableType::Array(element_type, size) => {
                         panic!(

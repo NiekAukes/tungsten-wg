@@ -21,6 +21,9 @@ pub fn convert_type(t: &spmt::VariableType) -> cuda::Type {
         spmt::VariableType::PermutationTable => {
             cuda::Type::ConstPointer(Box::new(cuda::Type::Int8))
         }
+        spmt::VariableType::InterpolatedNoiseSampler => cuda::Type::ConstPointer(Box::new(
+            cuda::Type::Struct(crate::transform_rcl::BASE3D_NOISE_SAMPLER_STRUCT_NAME.to_string()),
+        )),
         spmt::VariableType::Bool => cuda::Type::Int32,
         spmt::VariableType::Array(elem_type, size) => {
             let elem_type = Box::new(convert_type(elem_type));
@@ -57,14 +60,17 @@ pub fn convert_unary_op(op: spmt::UnaryOperator) -> cuda::UnaryOperator {
 
 /// Generate the CUDA parameter name for a permutation table input.
 pub fn permutation_table_param_name(perm_table: &spmt::PermutationTableInput) -> String {
-    crate::transform_cuda::sanitize_name(&format!(
-        "perm_table_{}_{}_{}",
-        perm_table.ident,
-        perm_table.subident_index,
-        perm_table
-            .subident
-            .as_ref()
-            .map(|s| s.as_str())
-            .unwrap_or("")
-    ))
+    match perm_table {
+        spmt::PermutationTableInput::PerlinNoise {
+            ident,
+            subident,
+            subident_index,
+        } => crate::transform_cuda::sanitize_name(&format!(
+            "perm_table_{}_{}_{}",
+            ident,
+            subident_index,
+            subident.as_ref().map(|s| s.as_str()).unwrap_or("")
+        )),
+        spmt::PermutationTableInput::Base3DNoise => "base3d_perm_table".to_string(),
+    }
 }

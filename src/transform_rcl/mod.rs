@@ -24,6 +24,7 @@ pub mod types;
 
 pub const PERM_TABLES_STRUCT_NAME: &str = "PermutationTables";
 pub const PERLIN_NOISE_SAMPLER_STRUCT_NAME: &str = "PerlinNoiseSampler";
+pub const BASE3D_NOISE_SAMPLER_STRUCT_NAME: &str = "InterpolatedNoiseSampler";
 /// Converter state for transforming SPMT to RCL
 pub struct RCLFunctionConverter<'m> {
     /// Maps SPMT variable addresses to RCL variables

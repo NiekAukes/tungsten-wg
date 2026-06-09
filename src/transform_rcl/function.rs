@@ -168,10 +168,7 @@ pub fn convert_density_function<'a, 'm>(
     //let mut perm_tables = Vec::new();
     for input in &spmt_df.permutation_table_inputs {
         let param_name = permutation_table_var_name(input);
-        rcl_func.add_parameter(
-            param_name.clone(),
-            convert_type(&spmt::VariableType::PermutationTable),
-        );
+        rcl_func.add_parameter(param_name.clone(), get_permutation_table_type(input));
         //perm_tables.push(input.clone());
     }
 
@@ -266,4 +263,15 @@ pub fn convert_density_function<'a, 'm>(
         .insert(spmt_df.addr(), rcl_func_ref.clone());
 
     (rcl_funcs, rcl_func_ref, converter, constants)
+}
+
+fn get_permutation_table_type(input: &spmt::PermutationTableInput) -> rcl::Type {
+    match input {
+        spmt::PermutationTableInput::PerlinNoise { .. } => rcl::Type::Ref(Box::new(
+            rcl::Type::Struct(crate::transform_rcl::PERLIN_NOISE_SAMPLER_STRUCT_NAME.to_string()),
+        )),
+        spmt::PermutationTableInput::Base3DNoise { .. } => rcl::Type::Ref(Box::new(
+            rcl::Type::Struct(crate::transform_rcl::BASE3D_NOISE_SAMPLER_STRUCT_NAME.to_string()),
+        )),
+    }
 }

@@ -341,47 +341,10 @@ impl CudaOrchestrationCodegen {
             )
             .unwrap();
             for pt in perm_tables {
-                let pn = builders::perm_table_cuda_param_name(pt);
-                let ident_seed = random::xoroshiro_seed(&pt.ident);
-                let (subident_lo, subident_hi) = pt
-                    .subident
-                    .as_deref()
-                    .map(random::xoroshiro_seed)
-                    .unwrap_or((0, 0));
-                writeln!(self.code, "        {{").unwrap();
-                writeln!(self.code, "            int8_t h_table[256];").unwrap();
-                writeln!(
-                    self.code,
-                    "            make_perm_table(h_table, world_seed,"
-                )
-                .unwrap();
-                writeln!(
-                    self.code,
-                    "                UINT64_C(0x{:016x}), UINT64_C(0x{:016x}), // ident: \"{}\"",
-                    ident_seed.0, ident_seed.1, pt.ident
-                )
-                .unwrap();
-                writeln!(self.code, "                INT64_C({}),", pt.subident_index).unwrap();
-                writeln!(
-                    self.code,
-                    "                UINT64_C(0x{:016x}), UINT64_C(0x{:016x})  // subident: {}",
-                    subident_lo,
-                    subident_hi,
-                    pt.subident.as_deref().unwrap_or("(none)")
-                )
-                .unwrap();
-                writeln!(self.code, "            );").unwrap();
-                writeln!(
-                    self.code,
-                    "            cudaMalloc(&d_{pn}, 256 * sizeof(int8_t));"
-                )
-                .unwrap();
-                writeln!(
-                    self.code,
-                    "            cudaMemcpy(d_{pn}, h_table, 256 * sizeof(int8_t), cudaMemcpyHostToDevice);"
-                )
-                .unwrap();
-                writeln!(self.code, "        }}").unwrap();
+                match pt {
+                    PermutationTableInput::PerlinNoise { .. } => self.emit_perm_table_perlin(pt),
+                    PermutationTableInput::Base3DNoise => self.emit_perm_table_base3d(),
+                }
             }
             writeln!(self.code).unwrap();
         }
@@ -474,7 +437,11 @@ impl CudaOrchestrationCodegen {
                 }
 
                 // Output buffer.
-                writeln!(self.code, ",\n                d_{dep_name}_output\n            );").unwrap();
+                writeln!(
+                    self.code,
+                    ",\n                d_{dep_name}_output\n            );"
+                )
+                .unwrap();
                 writeln!(self.code, "        }}").unwrap();
             }
 
@@ -505,6 +472,68 @@ impl CudaOrchestrationCodegen {
     fn emit_class_close(&mut self) {
         writeln!(self.code, "}};").unwrap();
         writeln!(self.code).unwrap();
+    }
+
+    fn emit_perm_table_perlin(&mut self, pt: &PermutationTableInput) {
+        let pn = builders::perm_table_cuda_param_name(pt);
+        let PermutationTableInput::PerlinNoise {
+            ident,
+            subident,
+            subident_index,
+        } = pt
+        else {
+            panic!("emit_perm_table_perlin called with non-Perlin permutation table");
+        };
+        let subident_name = subident.as_deref().unwrap_or("");
+        let ident_name = ident.as_str();
+        let ident_seed = random::xoroshiro_seed(&ident);
+        let (subident_lo, subident_hi) = subident
+            .as_deref()
+            .map(random::xoroshiro_seed)
+            .unwrap_or((0, 0));
+        writeln!(self.code, "        {{").unwrap();
+        writeln!(self.code, "            int8_t h_table[256];").unwrap();
+        writeln!(
+            self.code,
+            "            make_perm_table(h_table, world_seed,"
+        )
+        .unwrap();
+        writeln!(
+            self.code,
+            "                UINT64_C(0x{:016x}), UINT64_C(0x{:016x}), // ident: \"{}\"",
+            ident_seed.0, ident_seed.1, ident_name
+        )
+        .unwrap();
+        writeln!(self.code, "                INT64_C({}),", subident_index).unwrap();
+        writeln!(
+            self.code,
+            "                UINT64_C(0x{:016x}), UINT64_C(0x{:016x})  // subident: {}",
+            subident_lo, subident_hi, subident_name
+        )
+        .unwrap();
+        writeln!(self.code, "            );").unwrap();
+        writeln!(
+            self.code,
+            "            cudaMalloc(&d_{pn}, 256 * sizeof(int8_t));"
+        )
+        .unwrap();
+        writeln!(
+            self.code,
+            "            cudaMemcpy(d_{pn}, h_table, 256 * sizeof(int8_t), cudaMemcpyHostToDevice);"
+        )
+        .unwrap();
+        writeln!(self.code, "        }}").unwrap();
+    }
+
+    fn emit_perm_table_base3d(&mut self) {
+        let pn = builders::perm_table_cuda_param_name(&PermutationTableInput::Base3DNoise);
+        writeln!(self.code, "        {{").unwrap();
+        writeln!(
+            self.code,
+            "            // Base3DNoise uses a fixed, hardcoded permutation table — no need to allocate or initialize on the GPU."
+        )
+        .unwrap();
+        writeln!(self.code, "        }}").unwrap();
     }
 }
 

@@ -237,6 +237,7 @@ impl TypeCache {
             spmt::VariableType::I32 => self.u32_ty,
             spmt::VariableType::I64 => self.i64_ty,
             spmt::VariableType::PermutationTable => self.perm_table_ty,
+            spmt::VariableType::InterpolatedNoiseSampler => self.i64_ty, // TODO
             spmt::VariableType::Extern(_name) => {
                 // Extern types require the extern_converter - use convert_type_full instead
                 panic!("Extern types require extern_converter. Use convert_type_full instead.")
@@ -365,12 +366,19 @@ pub fn convert_unary_op(op: spmt::UnaryOperator) -> naga::UnaryOperator {
 
 /// Generate a sanitized permutation table variable name, matching the RCL convention.
 pub fn permutation_table_var_name(perm_table: &spmt::PermutationTableInput) -> String {
-    sanitize_name(&format!(
-        "perm_table_{}_{}_{}",
-        perm_table.ident,
-        perm_table.subident_index,
-        perm_table.subident.as_ref().unwrap_or(&"".to_string())
-    ))
+    match perm_table {
+        spmt::PermutationTableInput::PerlinNoise {
+            ident,
+            subident,
+            subident_index,
+        } => sanitize_name(&format!(
+            "perm_table_{}_{}_{}",
+            ident,
+            subident_index,
+            subident.as_ref().map(|s| s.as_str()).unwrap_or("")
+        )),
+        spmt::PermutationTableInput::Base3DNoise => "base3d_perm_table".to_string(),
+    }
 }
 
 /// Sanitize identifier names for use in shaders (replace non-alphanumeric chars with underscores).

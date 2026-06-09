@@ -82,6 +82,7 @@ impl GpuOrchestrationCodegen {
         writeln!(self.code, "use crate::mathf64::Vec3;").unwrap();
         writeln!(self.code, "use crate::orchestration::PermutationTables;").unwrap();
         writeln!(self.code, "use crate::utils::PerlinNoiseSampler;").unwrap();
+        writeln!(self.code, "use crate::utilsf64::InterpolatedNoiseSampler;").unwrap();
         writeln!(self.code, "use wgpu::util::DeviceExt;").unwrap();
         writeln!(self.code).unwrap();
         writeln!(self.code, "const GRID_X: u32 = {};", gx).unwrap();
@@ -634,9 +635,17 @@ impl GpuOrchestrationCodegen {
                 writeln!(self.code, "            let mut packed = Vec::new();").unwrap();
                 for pt in &s.shader.permutation_tables {
                     let field = builders::perm_table_field_name(pt);
+                    let helper = match pt {
+                        crate::spmt::model::PermutationTableInput::PerlinNoise { .. } => {
+                            "perm_generator_bytes_perlin"
+                        }
+                        crate::spmt::model::PermutationTableInput::Base3DNoise => {
+                            "perm_generator_bytes_interpolated"
+                        }
+                    };
                     writeln!(
                         self.code,
-                        "            packed.extend_from_slice(&perm_generator_bytes(&perm_tables.{field}));"
+                        "            packed.extend_from_slice(&{helper}(&perm_tables.{field}));"
                     )
                     .unwrap();
                 }
@@ -796,10 +805,44 @@ impl GpuOrchestrationCodegen {
         writeln!(self.code).unwrap();
         writeln!(
             self.code,
-            "fn perm_generator_bytes(sampler: &PerlinNoiseSampler) -> Vec<u8> {{"
+            "fn perm_generator_bytes_perlin(sampler: &PerlinNoiseSampler) -> Vec<u8> {{"
         )
         .unwrap();
         writeln!(self.code, "    let mut bytes = Vec::with_capacity(1036);").unwrap();
+        writeln!(self.code, "    for &b in sampler.permutation.iter() {{").unwrap();
+        writeln!(
+            self.code,
+            "        bytes.extend_from_slice(&(b as i32).to_le_bytes());"
+        )
+        .unwrap();
+        writeln!(self.code, "    }}").unwrap();
+        writeln!(
+            self.code,
+            "    bytes.extend_from_slice(&(sampler.origin_x as f32).to_le_bytes());"
+        )
+        .unwrap();
+        writeln!(
+            self.code,
+            "    bytes.extend_from_slice(&(sampler.origin_y as f32).to_le_bytes());"
+        )
+        .unwrap();
+        writeln!(
+            self.code,
+            "    bytes.extend_from_slice(&(sampler.origin_z as f32).to_le_bytes());"
+        )
+        .unwrap();
+        writeln!(self.code, "    bytes").unwrap();
+        writeln!(self.code, "}}").unwrap();
+        writeln!(self.code).unwrap();
+
+        writeln!(
+            self.code,
+            "fn perm_generator_bytes_interpolated(sampler: &InterpolatedNoiseSampler) -> Vec<u8> {{"
+        )
+        .unwrap();
+        writeln!(self.code, "    let mut bytes = Vec::with_capacity(1036);").unwrap();
+        // let sampler = &sampler.interpolation[0];
+        writeln!(self.code, "    let sampler = &sampler.interpolation[0];").unwrap();
         writeln!(self.code, "    for &b in sampler.permutation.iter() {{").unwrap();
         writeln!(
             self.code,

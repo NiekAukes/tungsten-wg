@@ -41,8 +41,12 @@ pub struct BuilderState<'a, 'm> {
     pub noise_cache: NoiseCache<'a, 'm>,
 
     working_dimensions: (i32, i32, i32),
+    original_dimensions: (i32, i32, i32),
     working_scaled_position: (f64, f64, f64),
+    original_scaled_position: (f64, f64, f64),
     working_scaled_origin: (f64, f64, f64),
+    original_scaled_origin: (f64, f64, f64),
+    known_y_sample_point: Option<i32>, // for cache2d, the y value at which the density is sampled. Flatcache can set this to 0.
 
     pub noise_settings: NoiseSettings,
     density_counter: usize,
@@ -69,8 +73,12 @@ impl<'a, 'm> Transformer<'a, 'm> {
                 density_function_cache: std::collections::HashMap::new(),
                 noise_cache: std::collections::HashMap::new(),
                 working_dimensions: (0, 0, 0),
+                original_dimensions: (0, 0, 0),
                 working_scaled_position: (1.0, 1.0, 1.0),
+                original_scaled_position: (1.0, 1.0, 1.0),
                 working_scaled_origin: (1.0, 1.0, 1.0),
+                original_scaled_origin: (1.0, 1.0, 1.0),
+                known_y_sample_point: None,
                 noise_settings: NoiseSettings {
                     min_y: 0,
                     height: 256,
@@ -92,8 +100,11 @@ impl<'a, 'm> Transformer<'a, 'm> {
                     {
                         let bs = self.builder_state.as_mut().unwrap();
                         bs.working_dimensions = (1, 1, 1);
+                        bs.original_dimensions = (1, 1, 1);
                         bs.working_scaled_origin = (1.0, 1.0, 1.0);
+                        bs.original_scaled_origin = (1.0, 1.0, 1.0);
                         bs.working_scaled_position = (1.0, 1.0, 1.0);
+                        bs.original_scaled_position = (1.0, 1.0, 1.0);
                         bs.noise_settings = noise_generator.noise.clone();
                     }
 
@@ -106,8 +117,11 @@ impl<'a, 'm> Transformer<'a, 'm> {
                     {
                         let bs = self.builder_state.as_mut().unwrap();
                         bs.working_dimensions = dimensions;
+                        bs.original_dimensions = dimensions;
                         bs.working_scaled_origin = (1.0, 1.0, 1.0);
+                        bs.original_scaled_origin = (1.0, 1.0, 1.0);
                         bs.working_scaled_position = (1.0, 1.0, 1.0);
+                        bs.original_scaled_position = (1.0, 1.0, 1.0);
                         bs.noise_settings = noise_generator.noise.clone();
                     }
 

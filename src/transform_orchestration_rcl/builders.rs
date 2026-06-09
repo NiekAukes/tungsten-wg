@@ -8,14 +8,24 @@ use crate::{
     },
     rcl::{Expression, Statement, Struct, Type, Variable},
     spmt::model::PermutationTableInput,
-    transform_rcl::{PERLIN_NOISE_SAMPLER_STRUCT_NAME, PERM_TABLES_STRUCT_NAME, sanitize_name},
+    transform_rcl::{
+        BASE3D_NOISE_SAMPLER_STRUCT_NAME, PERLIN_NOISE_SAMPLER_STRUCT_NAME,
+        PERM_TABLES_STRUCT_NAME, sanitize_name,
+    },
 };
 
 pub const PERM_TABLES_PARAM_NAME: &str = "perm_tables";
 
 /// RCL type used for a single boxed permutation table (`Box<[i8; 256]>`).
-pub fn perm_table_type() -> Type {
-    Type::Struct(format!("Box<{}>", PERLIN_NOISE_SAMPLER_STRUCT_NAME))
+pub fn perm_table_type(pt: &PermutationTableInput) -> Type {
+    match pt {
+        PermutationTableInput::PerlinNoise { .. } => {
+            Type::Struct(format!("Box<{}>", PERLIN_NOISE_SAMPLER_STRUCT_NAME))
+        }
+        PermutationTableInput::Base3DNoise => {
+            Type::Struct(format!("Box<{}>", BASE3D_NOISE_SAMPLER_STRUCT_NAME))
+        }
+    }
 }
 
 /// Builds an RCL function `make_permutation_tables() -> PermutationTables` that
@@ -38,28 +48,45 @@ pub fn build_perm_tables_init_fn<'m>(
 
     let mut struct_fields = Vec::new();
     for perm_table in perm_tables {
-        let field_name = perm_table_var_name(perm_table);
-        let ident_seed = super::random::xoroshiro_seed(&perm_table.ident);
-        let subident_seed = perm_table
-            .subident
-            .as_deref()
-            .map(super::random::xoroshiro_seed)
-            .unwrap_or((0, 0));
+        match perm_table {
+            PermutationTableInput::PerlinNoise {
+                ident,
+                subident,
+                subident_index,
+            } => {
+                let field_name = perm_table_var_name(perm_table);
+                let ident_seed = super::random::xoroshiro_seed(ident);
+                let subident_seed = subident
+                    .as_deref()
+                    .map(super::random::xoroshiro_seed)
+                    .unwrap_or((0, 0));
 
-        let call = Expression::LateBoundCall {
-            function_name: "make_permutation_table".to_string(),
-            arguments: vec![
-                Expression::Variable(seed_var.clone()),
-                Expression::I64Literal(ident_seed.0 as i64),
-                Expression::I64Literal(ident_seed.1 as i64),
-                Expression::I64Literal(perm_table.subident_index as i64),
-                Expression::I64Literal(subident_seed.0 as i64),
-                Expression::I64Literal(subident_seed.1 as i64),
-            ],
-            argument_types: vec![Type::I64, Type::I64, Type::I64, Type::I64],
-            return_type: perm_table_type(),
-        };
-        struct_fields.push((field_name, call));
+                let call = Expression::LateBoundCall {
+                    function_name: "make_permutation_table".to_string(),
+                    arguments: vec![
+                        Expression::Variable(seed_var.clone()),
+                        Expression::I64Literal(ident_seed.0 as i64),
+                        Expression::I64Literal(ident_seed.1 as i64),
+                        Expression::I64Literal(*subident_index as i64),
+                        Expression::I64Literal(subident_seed.0 as i64),
+                        Expression::I64Literal(subident_seed.1 as i64),
+                    ],
+                    argument_types: vec![Type::I64, Type::I64, Type::I64, Type::I64],
+                    return_type: perm_table_type(perm_table),
+                };
+                struct_fields.push((field_name, call));
+            }
+            PermutationTableInput::Base3DNoise => {
+                let field_name = perm_table_var_name(perm_table);
+                let call = Expression::LateBoundCall {
+                    function_name: "make_base3d_perm_table".to_string(),
+                    arguments: vec![Expression::Variable(seed_var.clone())],
+                    argument_types: vec![Type::I64],
+                    return_type: perm_table_type(perm_table),
+                };
+                struct_fields.push((field_name, call));
+            }
+        }
     }
 
     f.body.push(crate::rcl::model::Statement::Return(Some(
@@ -77,19 +104,26 @@ pub fn build_perm_tables_init_fn<'m>(
 pub fn build_perm_tables_struct(perm_tables: &[PermutationTableInput]) -> Struct {
     let mut s = Struct::new(format!("{}", PERM_TABLES_STRUCT_NAME));
     for perm_table in perm_tables {
-        s.add_field(perm_table_var_name(perm_table), perm_table_type());
+        s.add_field(perm_table_var_name(perm_table), perm_table_type(perm_table));
     }
     s
 }
 
 /// Derives the Rust field/variable name for a permutation table.
 pub fn perm_table_var_name(perm_table: &PermutationTableInput) -> String {
-    sanitize_name(&format!(
-        "{}_{}_{}",
-        perm_table.ident,
-        perm_table.subident_index,
-        perm_table.subident.as_ref().unwrap_or(&"".to_string())
-    ))
+    match perm_table {
+        PermutationTableInput::PerlinNoise {
+            ident,
+            subident,
+            subident_index,
+        } => sanitize_name(&format!(
+            "{}_{}_{}",
+            ident,
+            subident_index,
+            subident.as_ref().unwrap_or(&"".to_string())
+        )),
+        PermutationTableInput::Base3DNoise => "base3d_perm_table".to_string(),
+    }
 }
 
 /// Creates a `Box<[f64; N]>` initialiser expression via `make_buffer::<N>()`.
@@ -237,7 +271,8 @@ pub fn make_shader_loop<'m>(
     ];
     call_arg_types.extend(dep_types);
     for _ in &perm_exprs {
-        call_arg_types.push(perm_table_type());
+        //wrong, but we don't actually need the exact types here
+        call_arg_types.push(perm_table_type(&PermutationTableInput::Base3DNoise));
     }
 
     let call_stmt = Statement::ArrayAssign {

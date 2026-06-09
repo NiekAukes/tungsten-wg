@@ -1,3 +1,5 @@
+use naga::CooperativeRole::A;
+
 use crate::parse::{
     MinecraftData, model::Density, model::DensityType, spline::SplineParseFunctions,
 };
@@ -252,8 +254,12 @@ impl<'m> DensityParseFunctions<'m> for MinecraftData<'m> {
                                 name,
                             })
                         }
-
-                        "minecraft:blend_offset" | "minecraft:blend_alpha" => {
+                        "minecraft:blend_alpha" => {
+                            // blend_offset is used for compatibility with older worlds, it blends terrain heights near world borders
+                            // for new terrian, it is effectively a 0
+                            self.arena.alloc(DensityType::Const(1.0))
+                        }
+                        "minecraft:blend_offset" => {
                             // blend_offset is used for compatibility with older worlds, it blends terrain heights near world borders
                             // for new terrian, it is effectively a 0
                             self.arena.alloc(DensityType::Const(0.0))
@@ -473,12 +479,13 @@ impl<'m> DensityParseFunctions<'m> for MinecraftData<'m> {
                 // also allow referencing density functions directly
                 let parsed = self.parse_density_function(referenced);
                 let name = s.to_string();
-                let argument = if let DensityType::FlatCache { argument } = parsed {
-                    // turn the flat cache into a named density reference
-                    *argument
-                } else {
-                    parsed
-                };
+                // let argument = if let DensityType::CacheOnce { argument } = parsed {
+                //     // turn the flat cache into a named density reference
+                //     *argument
+                // } else {
+                //     parsed
+                // };
+                let argument = parsed;
                 self.arena.alloc(DensityType::NamedDensityReference {
                     name: self.arena.alloc(name),
                     argument,
