@@ -769,10 +769,12 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                                         Expression::Variable(self.p.clone()),
                                         Expression::Int(dimensions.0),
                                         Expression::Int(dimensions.1),
+                                        Expression::Int(dimensions.2),
                                     ],
 
                                     parameter_types: vec![
                                         VariableType::Pos3,
+                                        VariableType::I32,
                                         VariableType::I32,
                                         VariableType::I32,
                                     ],

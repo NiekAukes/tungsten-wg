@@ -281,10 +281,16 @@ pub fn make_shader_loop<'m>(
             function_name: "as_index".to_string(),
             arguments: vec![
                 Expression::Variable(loop_var.clone()),
-                Expression::I32Literal(dep.dimensions.2),
+                Expression::I32Literal(dep.dimensions.0),
                 Expression::I32Literal(dep.dimensions.1),
+                Expression::I32Literal(dep.dimensions.2),
             ],
-            argument_types: vec![Type::Struct("Pos3".to_string()), Type::I32, Type::I32],
+            argument_types: vec![
+                Type::Struct("Pos3".to_string()),
+                Type::I32,
+                Type::I32,
+                Type::I32,
+            ],
             return_type: Type::U64,
         },
         value: Expression::LateBoundCall {

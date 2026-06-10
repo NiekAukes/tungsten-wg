@@ -24,13 +24,14 @@ pub fn try_derive_type<'a>(expr: &model::Expression<'a>) -> Option<model::Variab
         model::Expression::ArrayAccess { array, index } => {
             let array_type = try_derive_type(array)?;
             match array_type {
-                model::VariableType::Vec3 => Some(model::VariableType::F32), // Accessing a vec3 component gives f32
-                model::VariableType::Pos3 => Some(model::VariableType::F32), // Accessing a pos3 component gives f32
+                model::VariableType::Vec3 => Some(model::VariableType::F64),
+                model::VariableType::Pos3 => Some(model::VariableType::F64),
+                model::VariableType::DensityInput => Some(model::VariableType::F64), // Assuming density inputs are arrays of floats
                 _ => None, // For other array types, we would need more information to derive the element type
             }
         }
-        model::Expression::ConstructExtern { t, args } => todo!(),
-        model::Expression::ArrayLiteral(expressions) => todo!(),
+        model::Expression::ConstructExtern { t, args } => Some(t.clone()), // Assume the type is determined by the construct extern declaration
+        model::Expression::ArrayLiteral(expressions) => None,
     }
 }
 

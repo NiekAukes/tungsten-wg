@@ -376,12 +376,14 @@ fn convert_vec3_to_position_expression<'m>(
             rcl::Type::Struct("Pos3".to_string()),
             rcl::Type::I32,
             rcl::Type::I32,
+            rcl::Type::I32,
         ],
         return_type: rcl::Type::F32,
         arguments: vec![
             p,
             rcl::Expression::I32Literal(dims.0),
             rcl::Expression::I32Literal(dims.1),
+            rcl::Expression::I32Literal(dims.2),
         ],
     }
 }

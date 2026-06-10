@@ -75,6 +75,65 @@ impl RustCodeGenerator {
         p.finish()
     }
 
+    pub fn generate_inline_module(&self, icl: &icl::RCL<'_>, module_name: &str) -> String {
+        let mut p = Printer::new();
+
+        p.line(&format!("mod {} {{", module_name));
+        p.indent();
+        p.line("// Auto-generated inline Rust module from RCL");
+        p.line("#[allow(dead_code)]");
+        p.line("#[allow(unused_variables)]");
+        p.line("#[allow(unused_imports)]");
+        p.line("#[allow(warnings)]");
+        p.line("#[allow(clippy::all)]");
+        p.line("#[allow(unne)]");
+
+        p.line("");
+
+        p.line("use super::*;");
+
+        for import in &icl.import_statements {
+            p.push("use ");
+            p.push(import);
+            p.line(";");
+        }
+
+        p.line("");
+
+        // Generate struct definitions
+        for struct_def in &icl.structs {
+            self.generate_struct(&mut p, struct_def);
+            p.line("");
+        }
+
+        // Generate constant definitions
+        for constant in &icl.constants {
+            p.push("const ");
+            let var_name = self.variable_to_string(&constant.var, &mut p);
+            p.push(&var_name);
+            p.push(": ");
+            p.push(&self.type_to_rust_string(&constant.var.t));
+            p.push(" = ");
+            let value_str = self.expression_to_string_with_printer(&mut p, &constant.value);
+            p.push(&value_str);
+            p.line(";");
+        }
+
+        // Generate functions (mark all as inline)
+        for func in &icl.functions {
+            self.generate_function(&mut p, func, false);
+            p.line("");
+        }
+
+        // Generate main functions (mark all as inline)
+        for func in &icl.main_functions {
+            self.generate_function(&mut p, func, true);
+            p.line("");
+        }
+
+        p.finish()
+    }
+
     /// Generate Rust code for a struct definition
     fn generate_struct(&self, p: &mut Printer, struct_def: &icl::StructRef<'_>) {
         p.push("pub struct ");
