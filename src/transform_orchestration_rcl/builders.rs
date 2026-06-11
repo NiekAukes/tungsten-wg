@@ -254,8 +254,15 @@ pub fn make_shader_loop<'m>(
         return_type: Type::Struct("Vec3".to_string()),
     };
 
+    let into_pos3 = Expression::LateBoundCall {
+        function_name: "PositionIterator::into".to_string(),
+        arguments: vec![Expression::Variable(loop_var.clone())],
+        argument_types: vec![Type::Struct("PositionIterator".to_string())],
+        return_type: Type::Struct("Pos3".to_string()),
+    };
+
     let mut call_args = vec![
-        Expression::Variable(loop_var.clone()),
+        into_pos3,
         Expression::Variable(origin_var),
         origin_scale_expr,
         position_scale_expr,
@@ -278,19 +285,9 @@ pub fn make_shader_loop<'m>(
     let call_stmt = Statement::ArrayAssign {
         target: output_var,
         index: Expression::LateBoundCall {
-            function_name: "as_index".to_string(),
-            arguments: vec![
-                Expression::Variable(loop_var.clone()),
-                Expression::I32Literal(dep.dimensions.0),
-                Expression::I32Literal(dep.dimensions.1),
-                Expression::I32Literal(dep.dimensions.2),
-            ],
-            argument_types: vec![
-                Type::Struct("Pos3".to_string()),
-                Type::I32,
-                Type::I32,
-                Type::I32,
-            ],
+            function_name: "iter_usize".to_string(),
+            arguments: vec![Expression::Variable(loop_var.clone())],
+            argument_types: vec![Type::Struct("PositionIterator".to_string())],
             return_type: Type::U64,
         },
         value: Expression::LateBoundCall {

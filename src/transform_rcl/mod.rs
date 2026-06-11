@@ -15,7 +15,7 @@ use std::rc::Rc;
 
 use crate::orchestrate::Scale;
 use crate::rcl::model as rcl;
-use crate::spmt::model::{self as spmt, Addr, DensityFunctionRef, DensityInput, Interned};
+use crate::spmt::model::{self as spmt, Addr, DensityFunctionRef, DensityInput};
 
 pub mod expression;
 pub mod function;
@@ -226,4 +226,22 @@ pub fn add_density_to_rcl_model<'a, 'm>(
 
     rcl_model.main_functions.push(rcl_density);
     converter
+}
+
+pub fn convert_spmt_to_inline_rcl<'a, 'm>(
+    program: &'a spmt::SPMT<'a>,
+    arena: &'m bumpalo::Bump,
+) -> rcl::RCL<'m> {
+    let mut rcl_model = rcl::RCL::new();
+    let mut already_converted_functions = HashMap::new();
+    for density_function in &program.density_functions {
+        let c = add_density_to_rcl_model(
+            &mut rcl_model,
+            density_function,
+            &arena,
+            already_converted_functions,
+        );
+        already_converted_functions = c.already_converted_functions;
+    }
+    rcl_model
 }

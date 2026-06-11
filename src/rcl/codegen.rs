@@ -78,7 +78,7 @@ impl RustCodeGenerator {
     pub fn generate_inline_module(&self, icl: &icl::RCL<'_>, module_name: &str) -> String {
         let mut p = Printer::new();
 
-        p.line(&format!("mod {} {{", module_name));
+        p.line(&format!("pub mod {} {{", module_name));
         p.indent();
         p.line("// Auto-generated inline Rust module from RCL");
         p.line("#[allow(dead_code)]");
@@ -130,6 +130,9 @@ impl RustCodeGenerator {
             self.generate_function(&mut p, func, true);
             p.line("");
         }
+
+        p.dedent();
+        p.line("}");
 
         p.finish()
     }

@@ -48,7 +48,7 @@ impl<'m> OrchestrationConverter<'m> {
         };
 
         self.rcl_model
-            .add_import("crate::density_function::*".to_string());
+            .add_import("super::density_function::*".to_string());
 
         orch_function.add_parameter("origin".to_string(), Type::Struct("Vec3".to_string()));
         let origin_var = Rc::new(Variable {

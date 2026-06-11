@@ -46,7 +46,7 @@ impl Default for BuilderSettings {
     fn default() -> Self {
         Self {
             enable_interpolation: true,
-            new_shader_named_densities: true,
+            new_shader_named_densities: false,
             use_new_spline: false,
         }
     }
