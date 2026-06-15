@@ -7,6 +7,7 @@ variables, binary/unary operations, function calls, and field access.
 use std::rc::Rc;
 
 use super::{RCLFunctionConverter, sanitize_name, types};
+use crate::orchestrate::Flatten;
 use crate::rcl::{Parameter, model as rcl};
 use crate::spmt::model::{self as spmt, Addr, Interned};
 use crate::spmt::try_derive_type;
@@ -123,6 +124,27 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
                 }
             }
             spmt::Expression::DensityVariable(input, index) => {
+                // the function is a density function, which is passed as a
+                // field of f32s, look up the parameter for this density function in the converter's density_function_inputs map
+                let function_param = self
+                    .density_function_inputs
+                    .get(&InputKey::from(input))
+                    //.expect("Density function input not found in converter")
+                    .cloned()
+                    .unwrap_or(Parameter {
+                        name: format!("err_{}", input.density_function.addr() as usize),
+                        t: rcl::Type::Void,
+                    });
+
+                if input.dimensions.flatten() == 1 {
+                    // single sampler mode, we can just access the density function parameter directly without converting the position to a 1D index
+                    return rcl::Expression::Variable(Rc::new(rcl::Variable {
+                        name: Some(function_param.name.clone()),
+                        t: function_param.t.clone(),
+                        mutable: false,
+                    }));
+                }
+
                 let onedposition = if index.is_some() {
                     self.convert_expression(index.as_ref().unwrap())
                 } else {
@@ -136,17 +158,6 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
                     )
                 };
 
-                // the function is a density function, which is passed as a
-                // field of f32s, look up the parameter for this density function in the converter's density_function_inputs map
-                let function_param = self
-                    .density_function_inputs
-                    .get(&InputKey::from(input))
-                    //.expect("Density function input not found in converter")
-                    .cloned()
-                    .unwrap_or(Parameter {
-                        name: format!("err_{}", input.density_function.addr() as usize),
-                        t: rcl::Type::Void,
-                    });
                 rcl::Expression::Index {
                     base: Box::new(rcl::Expression::Variable(Rc::new(rcl::Variable {
                         name: Some(function_param.name.clone()),

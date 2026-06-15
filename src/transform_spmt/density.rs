@@ -30,10 +30,10 @@ pub struct NormalNoiseKey<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DensityKey<'a> {
-    density: Density<'a>,
-    dimensions: (i32, i32, i32),
-    scaled_origin: Scale,
-    scaled_position: Scale,
+    pub density: Density<'a>,
+    pub dimensions: (i32, i32, i32),
+    pub scaled_origin: Scale,
+    pub scaled_position: Scale,
 }
 
 pub struct BuilderSettings {
@@ -71,10 +71,13 @@ pub struct DensityBuilder<'a, 'm> {
     pub(crate) p: Var<'m>,
     pub(crate) origin_scale: Var<'m>,
     pub(crate) position_scale: Var<'m>,
+
+    single_sampling_mode: bool,
 }
 
 impl<'a, 'm> DensityBuilder<'a, 'm> {
     pub fn new(arena: &'m bumpalo::Bump, state: BuilderState<'a, 'm>) -> Self {
+        let single_sampling_mode = matches!(state.original_dimensions, (1, 1, 1));
         let mut s = Self {
             density_function: DensityFunction {
                 body: Vec::new(),
@@ -89,6 +92,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
             function: None,
             helper_functions: Vec::new(),
             arena,
+            single_sampling_mode,
 
             builder_state: Some(state),
             builder_settings: BuilderSettings::default(),
@@ -364,7 +368,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         // borrow the caches from the builder state
         let mut bs = self.builder_state.take().unwrap();
         // lower the noise into a density function
-        let density_function_ref = if let Some(cached) = bs.density_function_cache.get(&density) {
+        let density_function_ref = if let Some(cached) = bs.get_cached_density(&density) {
             cached.clone()
         } else {
             // lower the density into an expression
@@ -375,7 +379,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
             let (density_function, helpers, bs_returned) = builder.finish(r);
 
             // additional check to see if the density function is aliased
-            if let Some(cached) = bs_returned.density_function_cache.get(&density) {
+            if let Some(cached) = bs_returned.get_cached_density(&density) {
                 let c = cached.clone();
                 bs = bs_returned;
                 c
@@ -385,8 +389,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
                 let density_function_ref =
                     DensityFunctionRef::new(self.arena.alloc(density_function));
 
-                bs.density_function_cache
-                    .insert(density, density_function_ref.clone());
+                bs.insert_density_cache(density, density_function_ref.clone());
                 density_function_ref
             }
         };
@@ -875,20 +878,22 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
 
                 let mut bs = self.builder_state.take().unwrap();
                 let old_dimensions = bs.working_dimensions;
-                let dimensions = (
-                    bs.original_dimensions.0 / 4 + 1,
-                    1,
-                    bs.original_dimensions.2 / 4 + 1,
-                );
+                // let dimensions = (
+                //     bs.original_dimensions.0 / 4 + 1,
+                //     1,
+                //     bs.original_dimensions.2 / 4 + 1,
+                // );
+                let dimensions = if bs.original_dimensions == (1, 1, 1) {
+                    // if the original dimensions are 1, then we are effectively already indexed by biome column, so we can just use dimensions of (1, 1, 1) and return the cached value directly without indexing.
+                    (1, 1, 1)
+                } else {
+                    (5, 1, 5)
+                };
                 let old_scaled_position = bs.working_scaled_position;
                 let old_scaled_origin = bs.working_scaled_origin;
 
                 bs.working_dimensions = dimensions;
-                bs.working_scaled_position = (
-                    bs.original_scaled_position.0 * 4.0,
-                    0.0, // doesn't matter
-                    bs.original_scaled_position.2 * 4.0,
-                );
+                bs.working_scaled_position = (4.0, 0.0, 4.0);
                 bs.working_scaled_origin = (old_scaled_origin.0, 0.0, old_scaled_origin.2);
                 bs.known_y_sample_point = Some(0); // y is set to 0
                 self.builder_state = Some(bs);

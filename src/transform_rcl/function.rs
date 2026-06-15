@@ -145,23 +145,37 @@ pub fn convert_density_function<'a, 'm>(
         };
 
         let dimensions = input.dimensions.flatten();
-        rcl_func.add_parameter(
-            param_name.clone(),
-            rcl::Type::ArrayRef(
-                Box::new(convert_type(&spmt::VariableType::DensityInput)),
-                dimensions as usize,
-            ),
-        );
-        density_inputs.insert(
-            InputKey::from(input),
-            Parameter {
-                name: param_name,
-                t: rcl::Type::ArrayRef(
+        if dimensions == 1 {
+            rcl_func.add_parameter(
+                param_name.clone(),
+                convert_type(&spmt::VariableType::DensityInput),
+            );
+            density_inputs.insert(
+                InputKey::from(input),
+                Parameter {
+                    name: param_name,
+                    t: convert_type(&spmt::VariableType::DensityInput),
+                },
+            );
+        } else {
+            rcl_func.add_parameter(
+                param_name.clone(),
+                rcl::Type::ArrayRef(
                     Box::new(convert_type(&spmt::VariableType::DensityInput)),
-                    input.dimensions.flatten() as usize,
+                    dimensions as usize,
                 ),
-            },
-        );
+            );
+            density_inputs.insert(
+                InputKey::from(input),
+                Parameter {
+                    name: param_name,
+                    t: rcl::Type::ArrayRef(
+                        Box::new(convert_type(&spmt::VariableType::DensityInput)),
+                        input.dimensions.flatten() as usize,
+                    ),
+                },
+            );
+        };
     }
 
     // add permutation tables as parameters

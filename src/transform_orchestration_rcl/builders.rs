@@ -167,11 +167,17 @@ pub fn collect_dep_args<'m>(
     let mut dep_types = Vec::new();
     for dep in shader_inputs {
         let dep_output_var = shader_output_map.get(&dep).unwrap();
-        dep_exprs.push(Expression::Ref(Box::new(Expression::Variable(
-            dep_output_var.clone(),
-        ))));
         let dep_dims = dep.dimensions.flatten() as usize;
-        dep_types.push(Type::Array(Box::new(Type::F64), dep_dims));
+        if dep_dims == 1 {
+            // for 1D outputs we pass a `&f64` instead of `&[f64; 1]`
+            dep_exprs.push(Expression::Variable(dep_output_var.clone()));
+            dep_types.push(Type::F64);
+        } else {
+            dep_exprs.push(Expression::Ref(Box::new(Expression::Variable(
+                dep_output_var.clone(),
+            ))));
+            dep_types.push(Type::Array(Box::new(Type::F64), dep_dims));
+        }
     }
     (dep_exprs, dep_types)
 }
@@ -209,7 +215,6 @@ pub fn make_shader_loop<'m>(
     shader_j: usize,
 ) -> Statement<'m> {
     let dims = dep.dimensions.flatten() as usize;
-    let shader_name = sanitize_name(&dep.shader.name);
 
     let loop_var = Rc::new(Variable {
         name: Some(format!("p_{}_{}", wave_i, shader_j)),
@@ -228,10 +233,60 @@ pub fn make_shader_loop<'m>(
         return_type: Type::Struct("Pos3".to_string()),
     };
 
+    let into_pos3 = Expression::LateBoundCall {
+        function_name: "PositionIterator::into".to_string(),
+        arguments: vec![Expression::Variable(loop_var.clone())],
+        argument_types: vec![Type::Struct("PositionIterator".to_string())],
+        return_type: Type::Struct("Pos3".to_string()),
+    };
+
+    let call_stmt = Statement::ArrayAssign {
+        target: output_var,
+        index: Expression::LateBoundCall {
+            function_name: "iter_usize".to_string(),
+            arguments: vec![Expression::Variable(loop_var.clone())],
+            argument_types: vec![Type::Struct("PositionIterator".to_string())],
+            return_type: Type::U64,
+        },
+        value: make_shader_call(
+            dep,
+            into_pos3,
+            origin_var.clone(),
+            dep_exprs,
+            dep_types,
+            perm_exprs,
+            wave_i,
+            shader_j,
+        ),
+    };
+
+    Statement::ForIn {
+        variable: loop_var,
+        iterable: loop_iter,
+        body: vec![call_stmt],
+    }
+}
+
+pub fn make_shader_call<'m>(
+    dep: &ShaderDependency<'m>,
+    pos3: Expression<'m>,
+    origin_var: Rc<Variable>,
+    dep_exprs: Vec<Expression<'m>>,
+    dep_types: Vec<Type>,
+    perm_exprs: Vec<Expression<'m>>,
+    wave_i: usize,
+    shader_j: usize,
+) -> Expression<'m> {
+    let shader_name = sanitize_name(&dep.shader.name);
+    let dims = dep.dimensions.flatten() as usize;
     // Extract scale values from ShaderDependency
     let (origin_scale_x, origin_scale_y, origin_scale_z) = dep.scaled_origin.as_float();
     let (position_scale_x, position_scale_y, position_scale_z) = dep.scaled_position.as_float();
-
+    let return_type = if dims == 1 {
+        Type::F64
+    } else {
+        Type::Array(Box::new(Type::F64), dims)
+    };
     let origin_scale_expr = Expression::LateBoundCall {
         function_name: "Vec3::new".to_string(),
         arguments: vec![
@@ -254,15 +309,8 @@ pub fn make_shader_loop<'m>(
         return_type: Type::Struct("Vec3".to_string()),
     };
 
-    let into_pos3 = Expression::LateBoundCall {
-        function_name: "PositionIterator::into".to_string(),
-        arguments: vec![Expression::Variable(loop_var.clone())],
-        argument_types: vec![Type::Struct("PositionIterator".to_string())],
-        return_type: Type::Struct("Pos3".to_string()),
-    };
-
     let mut call_args = vec![
-        into_pos3,
+        pos3,
         Expression::Variable(origin_var),
         origin_scale_expr,
         position_scale_expr,
@@ -281,26 +329,10 @@ pub fn make_shader_loop<'m>(
         //wrong, but we don't actually need the exact types here
         call_arg_types.push(perm_table_type(&PermutationTableInput::Base3DNoise));
     }
-
-    let call_stmt = Statement::ArrayAssign {
-        target: output_var,
-        index: Expression::LateBoundCall {
-            function_name: "iter_usize".to_string(),
-            arguments: vec![Expression::Variable(loop_var.clone())],
-            argument_types: vec![Type::Struct("PositionIterator".to_string())],
-            return_type: Type::U64,
-        },
-        value: Expression::LateBoundCall {
-            function_name: shader_name,
-            arguments: call_args,
-            argument_types: call_arg_types,
-            return_type: Type::Array(Box::new(Type::F64), dims),
-        },
-    };
-
-    Statement::ForIn {
-        variable: loop_var,
-        iterable: loop_iter,
-        body: vec![call_stmt],
+    Expression::LateBoundCall {
+        function_name: shader_name,
+        arguments: call_args,
+        argument_types: call_arg_types,
+        return_type,
     }
 }
