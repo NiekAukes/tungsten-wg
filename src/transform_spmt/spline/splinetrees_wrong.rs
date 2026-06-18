@@ -1,259 +1,63 @@
-// transform_spmt/spline.rs
-
-use serde::de::value;
-
-use crate::parse::model::Density;
-use crate::spmt::model::DensityInput;
-use crate::transform_spmt::density::{DensityBuilder, make_rpos3};
-use crate::transform_spmt::{newvar, prefixvar};
 use crate::{
-    parse::model::{Spline, SplinePoint, SplineValue},
-    spmt::model::{
-        BinaryOperator, Expression, Function, FunctionRef, Statement, Var, Variable, VariableType,
-    },
+    parse::model::{Density, Spline, SplinePoint, SplineValue},
+    spmt::model::{BinaryOperator, Expression, Function, Statement, Var, Variable, VariableType},
+    transform_spmt::{density::DensityBuilder, newvar, prefixvar},
 };
 
-// impl<'a, 'm> DensityBuilder<'a, 'm> {
-//     pub fn lower_spline_definition(
-//         &mut self,
-//         spline: Spline<'a>,
-//         canonical_name: Option<String>,
-//     ) -> FunctionRef<'m> {
-//         let mut function: Function<'m> = Function {
-//             canonical_name: canonical_name,
-//             parameters: Vec::new(),
-//             body: Vec::new(),
-//             variables: Vec::new(),
-//         };
-//         let p: Var<'m> = Var::new(self.arena.alloc(Variable {
-//             name: self.p.name.clone(),
-//             t: self.p.t.clone(),
-//         }));
-//         function.parameters.push(p.clone());
+#[derive(Debug, Clone)]
+struct InterpolationLevel {
+    index: usize,     // the tree index of this interpolation
+    derivative1: f64, // the derivative at the first point
+    derivative2: f64, // the derivative at the second point
+    location1: f64,   // the location of the first point
+    location2: f64,   // the location of the second point
+}
 
-//         // Compute coordinate
-//         let coordinate = newvar(self.arena, "coordinate", VariableType::F32);
-//         function.variables.push(coordinate.clone());
+#[derive(Debug, Clone)]
+struct InterpolationChain {
+    points: Vec<InterpolationLevel>, // levels of interpolation, each level has two points and their derivatives
+}
 
-//         let old_function = self.switch_function(function);
+impl InterpolationLevel {
+    fn get_level(&self) -> usize {
+        // k=⌊log2​(i+1)⌋
+        ((point.index + 1) as f64).log2().floor() as usize
+    }
+}
 
-//         let coord_input = self.lower_density_input(spline.coordinate, None);
-
-//         let coord_expr = Expression::DensityVariable(coord_input, None);
-
-//         self.add_statement(Statement::Assign {
-//             target: coordinate.clone(),
-//             value: coord_expr,
-//         });
-
-//         // -----------------------------------------
-//         // Sort points
-//         // -----------------------------------------
-//         let mut points = Vec::from(spline.spline_points);
-//         points.sort_by(|a, b| a.location.partial_cmp(&b.location).unwrap());
-
-//         // -----------------------------------------
-//         // Build interpolation chain
-//         // -----------------------------------------
-
-//         let r = self.build_spline_chain(&points, p, coordinate);
-//         let function: FunctionRef<'m> = self.finish_and_continue(r, old_function);
-//         function
-//     }
-
-//     fn build_spline_chain(
-//         &mut self,
-//         points: &[SplinePoint<'a>],
-//         p: Var<'m>,
-//         input: Var<'m>,
-//     ) -> Expression<'m> {
-//         // build the initial extrapolation
-//         // when input < first.location, extrapolate using the first point's derivative
-//         let first = &points[0];
-//         let initial_extrapolation = self.make_extrapolation(first, p.clone(), input.clone());
-
-//         // wrap it in an if statement that checks if input < first.location
-//         let cond = Expression::BinaryOp {
-//             op: BinaryOperator::Less,
-//             left: Box::new(Expression::Variable(input.clone())),
-//             right: Box::new(Expression::Float(first.location)),
-//         };
-//         let mut then_branch = Vec::new();
-//         then_branch.push(Statement::Return(initial_extrapolation));
-//         self.add_statement(Statement::If {
-//             condition: cond,
-//             then_branch,
-//             else_branch: Vec::new(),
-//         });
-
-//         self.continue_spline_chain(points, p, input)
-//     }
-
-//     fn continue_spline_chain(
-//         &mut self,
-//         points: &[SplinePoint<'a>],
-//         p: Var<'m>,
-//         input: Var<'m>,
-//     ) -> Expression<'m> {
-//         // Base case: one point → extrapolation
-//         if points.len() == 1 {
-//             return self.make_extrapolation(&points[0], p, input);
-//         }
-
-//         let first = &points[0];
-//         let second = &points[1];
-
-//         // if (input < second.location)
-//         let cond = Expression::BinaryOp {
-//             op: BinaryOperator::Less,
-//             left: Box::new(Expression::Variable(input.clone())),
-//             right: Box::new(Expression::Float(second.location)),
-//         };
-
-//         let mut then_branch = Vec::new();
-//         then_branch.push(self.make_hermite_return(first, second, p, input));
-
-//         self.add_statement(Statement::If {
-//             condition: cond,
-//             then_branch,
-//             else_branch: Vec::new(),
-//         });
-
-//         return self.continue_spline_chain(&points[1..], p, input);
-//     }
-
-//     fn lower_spline_value_expr(&mut self, value: &SplineValue<'a>, p: Var<'m>) -> Expression<'m> {
-//         match value {
-//             SplineValue::Const(c) => Expression::Float(*c),
-
-//             SplineValue::Spline(def) => {
-//                 // recursive spline -> generate nested function call
-//                 //let fname = format!("spline_nested");
-//                 let fref = self.lower_spline_definition(def, None);
-
-//                 Expression::FunctionCall {
-//                     function: fref,
-//                     parameters: vec![Expression::Variable(p.clone())],
-//                 }
-//             }
-//         }
-//     }
-
-//     fn make_extrapolation(
-//         &mut self,
-//         point: &SplinePoint<'a>,
-//         p: Var<'m>,
-//         input: Var<'m>,
-//     ) -> Expression<'m> {
-//         Expression::BinaryOp {
-//             op: BinaryOperator::Add,
-//             left: Box::new(Expression::BinaryOp {
-//                 op: BinaryOperator::Multiply,
-//                 left: Box::new(Expression::BinaryOp {
-//                     op: BinaryOperator::Subtract,
-//                     left: Box::new(Expression::Variable(input.clone())),
-//                     right: Box::new(Expression::Float(point.location)),
-//                 }),
-//                 right: Box::new(Expression::Float(point.derivative)),
-//             }),
-//             right: Box::new(self.lower_spline_value_expr(&point.value, p)),
-//         }
-//     }
-
-//     fn make_hermite_return(
-//         &mut self,
-//         first: &SplinePoint<'a>,
-//         second: &SplinePoint<'a>,
-//         p: Var<'m>,
-//         input: Var<'m>,
-//     ) -> Statement<'m> {
-//         let t = Expression::BinaryOp {
-//             op: BinaryOperator::Divide,
-//             left: Box::new(Expression::BinaryOp {
-//                 op: BinaryOperator::Subtract,
-//                 left: Box::new(Expression::Variable(input.clone())),
-//                 right: Box::new(Expression::Float(first.location)),
-//             }),
-//             right: Box::new(Expression::BinaryOp {
-//                 op: BinaryOperator::Subtract,
-//                 left: Box::new(Expression::Float(second.location)),
-//                 right: Box::new(Expression::Float(first.location)),
-//             }),
-//         };
-
-//         let f = self.lower_spline_value_expr(&first.value, p);
-//         let s = self.lower_spline_value_expr(&second.value, p);
-
-//         Statement::Return(Expression::ExternCall {
-//             function_name: "hermite".into(),
-//             parameters: vec![
-//                 t,
-//                 f,
-//                 s,
-//                 Expression::Float(first.derivative),
-//                 Expression::Float(second.derivative),
-//             ],
-//             parameter_types: vec![
-//                 VariableType::F32,
-//                 VariableType::F32,
-//                 VariableType::F32,
-//                 VariableType::F32,
-//                 VariableType::F32,
-//             ],
-//         })
-//     }
-// }
-
-/* New spline idea:
-
-Make a decision tree of the spline points
-decision_tree: [(u8, u24, f32)] = [(next_coord_idx, next_decision_idx, location)]
-values: [f32] = [value0, value1, value2, ...] (the values of the spline points in the same order as the decision tree)
-
-coord = input[0]
-decision_idx = 0
-decision = decision_tree[decision_idx]
-value = 0.0
-prev_value = 0.0
-derivative = 0.0
-location = 0.0
-
-next_coord_idx, next_decision_idx, location = decision
-
-for _ in max_depth {
-    decision_idx = next_decision_idx * (coord >= location) + (coord < location)
-    if coord < location && (nc > max_coord_idx || decision_idx > max_decision_idx) {
-        value, derivative = values[decision_idx - max_decision_idx]
-        prev_value = values[decision_idx - max_decision_idx - 1]
-        break
+impl InterpolationChain {
+    fn new() -> Self {
+        InterpolationChain { points: Vec::new() }
     }
 
-    decision = decision_tree[decision_idx]
-    next_coord_idx, next_decision_idx, location = decision
-    coord = input[next_coord_idx]
+    fn add_level(&mut self, level: InterpolationLevel) {
+        self.points.push(level);
+    }
+
+    fn move_down_to_left(&mut self) {
+        // change the indices such that index 0 becomes 1
+        // index 1 becomes 3
+        // index 2 becomes 4
+        // index 3 becomes 7, etc. (index n becomes 2^(n+1) - 1)
+        for point in self.points.iter_mut() {
+            let k = point.get_level();
+            point.index = (point.index * 2.pow(k))
+        }
+    }
+
+    fn move_down_to_right(&mut self) {
+        for point in self.points.iter_mut() {
+            let k = point.get_level();
+            point.index = (point.index * 2.pow(k+1))
+        }
+    }
+    
 }
 
-// get the value
-// interpolate or extrapolate based on the last decision
-
-// extrapolation: return (((coordinate - 1f) * 0.38940096f) + 0.69000006f);
-// hermite: fn hermite(t: f32, p0_: f32, p1_: f32, m0_: f32, m1_: f32) -> f32 {
-    let t2_ = (t * t);
-    let t3_ = (t2_ * t);
-    return (((((((2f * t3_) - (3f * t2_)) + 1f) * p0_) + (((t3_ - (2f * t2_)) + t) * m0_)) + (((-2f * t3_) + (3f * t2_)) * p1_)) + ((t3_ - t2_) * m1_));
-}
-
-if nc > max_coord_idx {
-    return (((coordinate - location) * derivative) + value);
-} else {
-    return hermite(t, prev_value, value, derivative, next_derivative);
-}
-
-
-*/
 struct DecisionTree<'a> {
     decisions: Vec<(Density<'a>, i32, f64)>, // next_coord_idx, next_decision_idx, next_value_idx location
-    values: Vec<(f64, f64)>,                 // (value, derivative)
+    //values: Vec<(f64, f64)>,                 // (value, derivative)
+    interp_chains: Vec<InterpolationChain>,
     coordinates: Vec<Density<'a>>,
     max_iterations: usize,
 }
@@ -262,13 +66,19 @@ impl<'a> DecisionTree<'a> {
     fn new() -> Self {
         DecisionTree {
             decisions: Vec::new(),
-            values: Vec::new(),
+            interp_chains: Vec::new(),
             coordinates: Vec::new(),
             max_iterations: 0,
         }
     }
 
-    fn finish(self) -> (Vec<(u8, u32, f64)>, Vec<(f64, f64)>, Vec<Density<'a>>) {
+    fn finish(
+        self,
+    ) -> (
+        Vec<(u8, u32, f64)>,
+        Vec<InterpolationChain>,
+        Vec<Density<'a>>,
+    ) {
         // concretely, we need to convert the decisions to use coordinate indices instead of variables
 
         let mut inputs = Vec::new();
@@ -298,232 +108,11 @@ impl<'a> DecisionTree<'a> {
 
             decisions.push((coord_idx, next_decision_idx as u32, location));
         }
-        (decisions, self.values, inputs)
+        (decisions, self.interp_chains, inputs)
     }
 }
 
 impl<'a, 'm> DensityBuilder<'a, 'm> {
-    /// Main entry point for spline lowering - routes to old or new implementation based on settings
-    pub fn lower_spline_definition(
-        &mut self,
-        spline: Spline<'a>,
-        canonical_name: Option<String>,
-    ) -> Expression<'m> {
-        if self.builder_settings.use_new_spline {
-            self.lower_spline_definition_new(spline, canonical_name)
-        } else {
-            self.lower_spline_definition_old(spline, canonical_name)
-        }
-    }
-
-    /// Old spline implementation: builds a chain of if-statements for interpolation
-    pub fn lower_spline_definition_old(
-        &mut self,
-        spline: Spline<'a>,
-        canonical_name: Option<String>,
-    ) -> Expression<'m> {
-        let mut function: Function<'m> = Function {
-            canonical_name: canonical_name,
-            parameters: Vec::new(),
-            body: Vec::new(),
-            variables: Vec::new(),
-            return_type: VariableType::F32,
-        };
-        let p: Var<'m> = Var::new(self.arena.alloc(Variable {
-            name: self.p.name.clone(),
-            t: self.p.t.clone(),
-        }));
-        function.parameters.push(p.clone());
-
-        // Compute coordinate
-        let coordinate = newvar(self.arena, "coordinate", VariableType::F32);
-        function.variables.push(coordinate.clone());
-
-        let old_function = self.switch_function(function);
-
-        let coord_input = self.lower_density_input(spline.coordinate, None, None);
-        let coord_expr = Expression::DensityVariable(coord_input, None);
-
-        self.add_statement(Statement::Assign {
-            target: coordinate.clone(),
-            value: coord_expr,
-        });
-
-        // -----------------------------------------
-        // Sort points
-        // -----------------------------------------
-        let mut points = Vec::from(spline.spline_points);
-        points.sort_by(|a, b| a.location.partial_cmp(&b.location).unwrap());
-
-        // -----------------------------------------
-        // Build interpolation chain
-        // -----------------------------------------
-
-        let r = self.build_spline_chain(&points, p, coordinate);
-        let function_ref = self.finish_and_continue(r, old_function);
-
-        // Wrap the function call in an expression
-        Expression::FunctionCall {
-            function: function_ref,
-            parameters: vec![Expression::Variable(self.p.clone())],
-        }
-    }
-
-    fn build_spline_chain(
-        &mut self,
-        points: &[SplinePoint<'a>],
-        p: Var<'m>,
-        input: Var<'m>,
-    ) -> Expression<'m> {
-        // build the initial extrapolation
-        // when input < first.location, extrapolate using the first point's derivative
-        let first = &points[0];
-        let initial_extrapolation = self.make_extrapolation(first, p.clone(), input.clone());
-
-        // wrap it in an if statement that checks if input < first.location
-        let cond = Expression::BinaryOp {
-            op: BinaryOperator::Less,
-            left: Box::new(Expression::Variable(input.clone())),
-            right: Box::new(Expression::Float(first.location as f32)),
-        };
-        let mut then_branch = Vec::new();
-        then_branch.push(Statement::Return(initial_extrapolation));
-        self.add_statement(Statement::If {
-            condition: cond,
-            then_branch,
-            else_branch: Vec::new(),
-        });
-
-        self.continue_spline_chain(points, p, input)
-    }
-
-    fn continue_spline_chain(
-        &mut self,
-        points: &[SplinePoint<'a>],
-        p: Var<'m>,
-        input: Var<'m>,
-    ) -> Expression<'m> {
-        // Base case: one point → extrapolation
-        if points.len() == 1 {
-            return self.make_extrapolation(&points[0], p, input);
-        }
-
-        let first = &points[0];
-        let second = &points[1];
-
-        // if (input < second.location)
-        let cond = Expression::BinaryOp {
-            op: BinaryOperator::Less,
-            left: Box::new(Expression::Variable(input.clone())),
-            right: Box::new(Expression::Float(second.location as f32)),
-        };
-
-        let mut then_branch = Vec::new();
-        then_branch.push(self.make_hermite_return(first, second, p, input));
-
-        self.add_statement(Statement::If {
-            condition: cond,
-            then_branch,
-            else_branch: Vec::new(),
-        });
-
-        return self.continue_spline_chain(&points[1..], p, input);
-    }
-
-    fn lower_spline_value_expr(&mut self, value: &SplineValue<'a>, p: Var<'m>) -> Expression<'m> {
-        match value {
-            SplineValue::Const(c) => Expression::Float(*c as f32),
-
-            SplineValue::Spline(def) => {
-                // recursive spline -> generate nested function call
-                let spline_expr = self.lower_spline_definition(*def, None);
-                // If it's a function call, we can use it directly; otherwise wrap it
-                spline_expr
-            }
-        }
-    }
-
-    fn make_extrapolation(
-        &mut self,
-        point: &SplinePoint<'a>,
-        p: Var<'m>,
-        input: Var<'m>,
-    ) -> Expression<'m> {
-        Expression::BinaryOp {
-            op: BinaryOperator::Add,
-            left: Box::new(Expression::BinaryOp {
-                op: BinaryOperator::Multiply,
-                left: Box::new(Expression::BinaryOp {
-                    op: BinaryOperator::Subtract,
-                    left: Box::new(Expression::Variable(input.clone())),
-                    right: Box::new(Expression::Float(point.location as f32)),
-                }),
-                right: Box::new(Expression::Float(point.derivative as f32)),
-            }),
-            right: Box::new(self.lower_spline_value_expr(&point.value, p)),
-        }
-    }
-
-    fn make_hermite_return(
-        &mut self,
-        first: &SplinePoint<'a>,
-        second: &SplinePoint<'a>,
-        p: Var<'m>,
-        input: Var<'m>,
-    ) -> Statement<'m> {
-        /*
-        let h_minus_g = -0.15_f32 - -0.19_f32;
-        let t = (coordinate - -0.19_f32) / h_minus_g;
-
-        return hermite(
-            t,
-            3.95_f32,
-            minecraft_factor_test_function_129124268986176(pos3, /* ... */) as f32,
-            0.0_f32,
-            0.0_f32,
-            h_minus_g
-        );
-         */
-        let h_minus_g = second.location as f32 - first.location as f32;
-        let h_minus_g_expr = Expression::Float(h_minus_g);
-        let t = Expression::BinaryOp {
-            op: BinaryOperator::Divide,
-            left: Box::new(Expression::BinaryOp {
-                op: BinaryOperator::Subtract,
-                left: Box::new(Expression::Variable(input.clone())),
-                right: Box::new(Expression::Float(first.location as f32)),
-            }),
-            right: Box::new(Expression::BinaryOp {
-                op: BinaryOperator::Subtract,
-                left: Box::new(Expression::Float(second.location as f32)),
-                right: Box::new(Expression::Float(first.location as f32)),
-            }),
-        };
-
-        let f = self.lower_spline_value_expr(&first.value, p);
-        let s = self.lower_spline_value_expr(&second.value, p);
-
-        Statement::Return(Expression::ExternCall {
-            function_name: "hermite".into(),
-            parameters: vec![
-                t,
-                f,
-                s,
-                Expression::Float(first.derivative as f32),
-                Expression::Float(second.derivative as f32),
-                h_minus_g_expr,
-            ],
-            parameter_types: vec![
-                VariableType::F32,
-                VariableType::F32,
-                VariableType::F32,
-                VariableType::F32,
-                VariableType::F32,
-                VariableType::F32,
-            ],
-        })
-    }
-
     pub fn lower_spline_definition_new(
         &mut self,
         spline: Spline<'a>,
@@ -796,12 +385,7 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
     }
 
     fn add_decisions_recursive(&mut self, spline: &Spline<'a>) -> DecisionTree<'a> {
-        let mut tree = DecisionTree {
-            decisions: Vec::new(),
-            values: Vec::new(),
-            coordinates: Vec::new(),
-            max_iterations: 0,
-        };
+        let mut tree = DecisionTree::new();
         //let coord_input = self.lower_density_input(spline.coordinate, None);
         tree.coordinates.push(spline.coordinate);
         tree.decisions
@@ -815,15 +399,21 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
 
         let mut to_add = Vec::new();
         let mut offset = spline.spline_points.len() as i32 + 1; // offset for decision indices of local trees
+        let mut decisions_taken = Vec::new();
+        let mut moving_chain_index = 0;
+        let mut values = Vec::new();
         for (i, point) in sorted_points.iter().enumerate() {
             // add decision for point.location
             // if point.value is a nested spline, build a local tree for it and add it to the decision tree
             match point.value {
                 SplineValue::Const(c) => {
-                    tree.values.push((c, point.derivative));
+                    //tree.values.push((c, point.derivative));
+                    decisions_taken.push(i);
+                    let chain = self.add_interpolation_chains_for_endpoints(tree, &decisions_taken);
+                    tree.interp_chains.push(chain);
                     tree.decisions.push((
                         spline.coordinate,
-                        -(tree.values.len() as i32 + 1), // negative index indicates a value index
+                        -(tree.interp_chains.len() as i32 + 1), // negative index indicates a value index
                         point.location,
                     ));
                     let local_iterations = i + 1;
@@ -896,6 +486,45 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
         }
 
         tree
+    }
+
+    fn add_interpolation_chains_for_endpoints(&mut self, spline: &Spline<'a>, route: &[usize]) -> InterpolationChain {
+        // walk the entire decision route and add interpolation levels for each endpoint
+        let (first, remainder) = route.split_first().unwrap();
+        let point = &spline.spline_points[*first];
+        if *first == 0 {
+            // no recursion, just add the point as an interpolation level
+            // this is actually an extrapolation level, but we can treat it as an interpolation between infinity and the first point
+            let mut lower_chain = self.add_interpolation_chains_for_endpoints(&spline, remainder);
+            lower_chain.move_down_to_right();
+
+            // this interpolation represents a straight line, i.e. extrapolation
+            lower_chain.add_level(InterpolationLevel {
+                index: 0,
+                derivative1: point.0.derivative, // derivative at the first point
+                derivative2: point.0.derivative, // derivative at the first point
+                location1: -1_000_000.0, // use a very large negative number to represent negative infinity
+                location2: point.2,
+            });
+            return lower_chain;
+        }
+
+        // if the point is +infinity, extrapolate the other way
+        if point.location.is_infinite() && point.location.is_sign_positive() {
+            let point_minus_one = &spline.spline_points[];
+            let mut upper_chain = self.add_interpolation_chains_for_endpoints(&spline, remainder);
+            upper_chain.move_down_to_left();
+
+            // this interpolation represents a straight line, i.e. extrapolation
+            upper_chain.add_level(InterpolationLevel {
+                index: 0,
+                derivative1: point.0.derivative, // derivative at the last point
+                derivative2: point.0.derivative, // derivative at the last point
+                location1: 1_000_000.0, // use a very large positive number to represent positive infinity
+                location2: point.2,
+            });
+            return upper_chain;
+        }
     }
 
     fn make_decision_tree_init(&mut self, decisions: &[(u8, u32, f64)]) -> Expression<'m> {

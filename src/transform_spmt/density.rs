@@ -47,7 +47,7 @@ impl Default for BuilderSettings {
         Self {
             enable_interpolation: true,
             new_shader_named_densities: false,
-            use_new_spline: false,
+            use_new_spline: true,
         }
     }
 }
@@ -71,13 +71,10 @@ pub struct DensityBuilder<'a, 'm> {
     pub(crate) p: Var<'m>,
     pub(crate) origin_scale: Var<'m>,
     pub(crate) position_scale: Var<'m>,
-
-    single_sampling_mode: bool,
 }
 
 impl<'a, 'm> DensityBuilder<'a, 'm> {
     pub fn new(arena: &'m bumpalo::Bump, state: BuilderState<'a, 'm>) -> Self {
-        let single_sampling_mode = matches!(state.original_dimensions, (1, 1, 1));
         let mut s = Self {
             density_function: DensityFunction {
                 body: Vec::new(),
@@ -92,7 +89,6 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
             function: None,
             helper_functions: Vec::new(),
             arena,
-            single_sampling_mode,
 
             builder_state: Some(state),
             builder_settings: BuilderSettings::default(),
@@ -1336,12 +1332,20 @@ impl<'a, 'm> DensityBuilder<'a, 'm> {
 
                 // assign it to a variable and return the variable
                 // this allows lowering to automatically cast the value if needed
-                let result_var = prefixvar(self.arena, "spline_result", VariableType::F64);
+                let intermediate_var =
+                    prefixvar(self.arena, "spline_result_f32", VariableType::F32);
+                let result_var = prefixvar(self.arena, "spline_result_f64", VariableType::F64);
+                self.add_variable(intermediate_var.clone());
+                self.add_statement(Statement::Assign {
+                    target: intermediate_var.clone(),
+                    value: call,
+                });
                 self.add_variable(result_var.clone());
                 self.add_statement(Statement::Assign {
                     target: result_var.clone(),
-                    value: call,
+                    value: Expression::Variable(intermediate_var.clone()),
                 });
+
                 Expression::Variable(result_var)
             }
             DensityType::Abs { argument } => {

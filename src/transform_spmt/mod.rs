@@ -132,12 +132,12 @@ impl<'a, 'm> Transformer<'a, 'm> {
                         bs.noise_settings = noise_generator.noise.clone();
                     }
 
-                    let density_function = self.lower_density_function(density);
+                    // let density_function = self.lower_density_function(density);
 
-                    self.final_model
-                        .main_density_functions
-                        .push((density_function, (1, 1, 1)));
-                    self.final_model.density_functions.push(density_function);
+                    // self.final_model
+                    //     .main_density_functions
+                    //     .push((density_function, (1, 1, 1)));
+                    // self.final_model.density_functions.push(density_function);
                 }
                 DensitySource::MultiSamplingDensity {
                     density,
