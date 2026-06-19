@@ -35,7 +35,7 @@ impl<'m> OrchestrationConverter<'m> {
     /// primary density, then call `finish()` to get the final RCL model.
     pub fn convert(
         &mut self,
-        orchestration: Vec<Vec<ShaderDependency<'m>>>,
+        orchestration: &Vec<Vec<ShaderDependency<'m>>>,
         returns: Vec<ShaderDependency<'m>>,
     ) {
         let mut orch_function = crate::rcl::model::Function {
@@ -43,7 +43,7 @@ impl<'m> OrchestrationConverter<'m> {
             parameters: Vec::new(),
             variables: Vec::new(),
             body: Vec::new(),
-            return_type: crate::rcl::model::Type::Void,
+            return_type: Some(crate::rcl::model::Type::Void),
             inline: false,
         };
 
@@ -102,7 +102,7 @@ impl<'m> OrchestrationConverter<'m> {
             .structs
             .push(Interned::new(self.arena.alloc(output_struct)));
 
-        orch_function.return_type = Type::Struct(output::OUTPUT_STRUCT_NAME.to_string());
+        orch_function.return_type = Some(Type::Struct(output::OUTPUT_STRUCT_NAME.to_string()));
         orch_function
             .body
             .push(Statement::Return(Some(Expression::StructInit {
@@ -138,7 +138,7 @@ impl<'m> OrchestrationConverter<'m> {
             parameters: Vec::new(),
             variables: Vec::new(),
             body: Vec::new(),
-            return_type: return_type.clone(),
+            return_type: Some(return_type.clone()),
             inline: false,
         };
 

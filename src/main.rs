@@ -244,24 +244,22 @@ fn run_with_args(args: Args) {
     // transform_rcl::add_density_to_rcl_model(&mut rcl_model, density_function, &rcl_arena);
 
     // convert all density functions to RCL and add them to the model
-    let rcl_arena = bumpalo::Bump::new();
-    let mut rcl_model = rcl::RCL::new();
-    let mut already_converted_functions = HashMap::new();
-    for density_function in &program.density_functions {
-        let c = transform_rcl::add_density_to_rcl_model(
-            &mut rcl_model,
-            density_function,
-            &rcl_arena,
-            already_converted_functions,
-        );
-        already_converted_functions = c.already_converted_functions;
-    }
+    // let mut rcl_model = rcl::RCL::new();
+    // let mut already_converted_functions = HashMap::new();
+    // for density_function in &program.density_functions {
+    //     let c = transform_rcl::add_density_to_rcl_model(
+    //         &mut rcl_model,
+    //         density_function,
+    //         &rcl_arena,
+    //         already_converted_functions,
+    //     );
+    //     already_converted_functions = c.already_converted_functions;
+    // }
 
+    let rcl_arena = bumpalo::Bump::new();
     let mut orchestration_conv = OrchestrationConverter::new(&rcl_arena);
-    orchestration_conv.convert(
-        orchestration.arrange_waves(),
-        orchestration.get_primary_shaders(),
-    );
+    let waves = orchestration.arrange_waves();
+    orchestration_conv.convert(&waves, orchestration.get_primary_shaders());
     // Generate a pruned orchestration function for each primary density
     for primary in &orchestration.get_primary_shaders() {
         let name = &primary.shader.name;
@@ -269,6 +267,8 @@ fn run_with_args(args: Args) {
 
         orchestration_conv.convert_single_entry(name, pruned_waves, primary);
     }
+
+    let rcl_model = transform_rcl::convert_spmt_to_inline_rcl(&program, &waves, &rcl_arena);
 
     let orchestration_rcl = orchestration_conv.finish();
 

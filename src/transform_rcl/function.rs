@@ -35,7 +35,8 @@ pub fn convert_function<'a, 'm>(
         .map(sanitize_name)
         .unwrap_or_else(|| format!("function_{}", spmt_func.addr() as usize));
     let func_name = format!("{}_{}", parent_density_name, func_name);
-    let mut rcl_func = rcl::Function::new(Some(func_name), convert_type(&spmt_func.return_type));
+    let mut rcl_func =
+        rcl::Function::new(Some(func_name), Some(convert_type(&spmt_func.return_type)));
 
     if let Some(cached) = converter.already_converted_functions.get(&spmt_func.addr()) {
         return (cached.clone(), converter, false);
@@ -92,8 +93,9 @@ pub fn convert_function<'a, 'm>(
 
 /// Convert an SPMT density function to an RCL function with converter state
 pub fn convert_density_function<'a, 'm>(
-    spmt_df: &'a spmt::DensityFunction<'a>,
+    spmt_df: spmt::DensityFunctionRef<'a>,
     arena: &'m bumpalo::Bump,
+    dimensions: (i32, i32, i32),
     already_converted_functions: HashMap<*const (), rcl::FunctionRef<'m>>,
 ) -> (
     Vec<rcl::FunctionRef<'m>>,
@@ -107,14 +109,29 @@ pub fn convert_density_function<'a, 'm>(
         .as_deref()
         .map(sanitize_name)
         .unwrap_or_else(|| format!("density_function_{}", spmt_df.addr() as usize));
-    let mut rcl_func = rcl::Function::new(
-        Some(density_func_name.clone()),
-        convert_type(&spmt::VariableType::DensityInput),
-    );
+    let mut rcl_func = rcl::Function::new(Some(density_func_name.clone()), None);
 
     // Add position parameters (x, y, z)
     // and origin parameters (ox, oy, oz)
-    rcl_func.add_parameter("pos3".to_string(), rcl::Type::Struct("Pos3".to_string()));
+    //rcl_func.add_parameter("pos3".to_string(), rcl::Type::Struct("Pos3".to_string()));
+    rcl_func.add_parameter(
+        "out".to_string(),
+        rcl::Type::MutArrayRef(Box::new(rcl::Type::F64), dimensions.flatten() as usize),
+    );
+    let out_var = Rc::new(rcl::Variable {
+        name: Some("out".to_string()),
+        t: rcl::Type::MutArrayRef(Box::new(rcl::Type::F64), dimensions.flatten() as usize),
+        mutable: true,
+    });
+
+    let p_var = Rc::new(rcl::Variable {
+        name: Some("p".to_string()),
+        t: rcl::Type::Struct("PositionIterator".to_string()),
+        mutable: false,
+    });
+
+    rcl_func.add_statement(rcl::Statement::InlineRust("let pos3 = p.pos;".to_string()));
+
     rcl_func.add_parameter("origin".to_string(), rcl::Type::Struct("Vec3".to_string()));
     rcl_func.add_parameter(
         "origin_scale".to_string(),
@@ -270,6 +287,21 @@ pub fn convert_density_function<'a, 'm>(
         rcl_func.add_statement(converted_stmt);
     }
 
+    let Some(rcl::Statement::Return(Some(end_expr))) = rcl_func.body.pop() else {
+        panic!("Density function must end with a return statement");
+    };
+
+    let assign = rcl::Statement::ArrayAssign {
+        target: out_var,
+        index: pos3_index(p_var.clone()),
+        value: end_expr,
+    };
+    rcl_func.add_statement(assign);
+
+    let end_stmt = wrap_in_loop(rcl_func.body, p_var.clone(), dimensions);
+    rcl_func.body = Vec::new();
+    rcl_func.add_statement(end_stmt);
+
     let rcl_func_ref = Interned::new(arena.alloc(rcl_func));
     // Store the converted function in the map
     converter
@@ -287,5 +319,40 @@ fn get_permutation_table_type(input: &spmt::PermutationTableInput) -> rcl::Type 
         spmt::PermutationTableInput::Base3DNoise { .. } => rcl::Type::Ref(Box::new(
             rcl::Type::Struct(crate::transform_rcl::BASE3D_NOISE_SAMPLER_STRUCT_NAME.to_string()),
         )),
+    }
+}
+
+fn wrap_in_loop<'a>(
+    body: Vec<rcl::Statement<'a>>,
+    pos3_var: Rc<rcl::Variable>,
+    dimensions: (i32, i32, i32),
+) -> rcl::Statement<'a> {
+    // for pos3 in iter_3d(5_i32, 49_i32, 5_i32) {
+    // statements...
+    // }
+    let iter_call = rcl::Expression::LateBoundCall {
+        function_name: "iter_3d".to_string(),
+        argument_types: vec![rcl::Type::I32, rcl::Type::I32, rcl::Type::I32],
+        return_type: rcl::Type::Struct("Pos3".to_string()),
+        arguments: vec![
+            rcl::Expression::I32Literal(dimensions.0),
+            rcl::Expression::I32Literal(dimensions.1),
+            rcl::Expression::I32Literal(dimensions.2),
+        ],
+    };
+    rcl::Statement::ForIn {
+        variable: pos3_var,
+        iterable: iter_call,
+        body,
+    }
+}
+
+fn pos3_index<'m>(pos3_var: Rc<rcl::Variable>) -> rcl::Expression<'m> {
+    // pos3.x * dimensions.y * dimensions.z + pos3.y * dimensions.z + pos3.z
+    rcl::Expression::LateBoundCall {
+        function_name: "index".to_string(),
+        argument_types: vec![rcl::Type::Struct("Pos3".to_string())],
+        return_type: rcl::Type::I32,
+        arguments: vec![rcl::Expression::Variable(pos3_var)],
     }
 }

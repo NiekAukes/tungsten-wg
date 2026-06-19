@@ -184,8 +184,12 @@ impl RustCodeGenerator {
             p.push(&self.type_to_rust_string(&param.t));
         }
 
-        p.push(") -> ");
-        p.push(&self.type_to_rust_string(&func.return_type));
+        if let Some(return_type) = &func.return_type {
+            p.push(") -> ");
+            p.push(&self.type_to_rust_string(return_type));
+        } else {
+            p.push(")");
+        }
         p.line(" {");
 
         p.indent();
@@ -483,6 +487,9 @@ impl RustCodeGenerator {
             icl::Expression::Ref(expr) => {
                 format!("(&{})", self.expression_to_string_with_printer(p, expr))
             }
+            icl::Expression::MutRef(expr) => {
+                format!("(&mut {})", self.expression_to_string_with_printer(p, expr))
+            }
             icl::Expression::Cast { expr, to_type } => {
                 format!(
                     "({} as {})",
@@ -619,6 +626,9 @@ impl RustCodeGenerator {
             }
             icl::Type::ArrayRef(inner, size) => {
                 format!("&[{}; {}]", self.type_to_rust_string(inner), size)
+            }
+            icl::Type::MutArrayRef(inner, size) => {
+                format!("&mut [{}; {}]", self.type_to_rust_string(inner), size)
             }
             icl::Type::Tuple(items) => {
                 let item_strs: Vec<String> =

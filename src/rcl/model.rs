@@ -33,7 +33,7 @@ pub struct RCL<'m> {
 pub struct Function<'m> {
     pub name: Option<String>,
     pub parameters: Vec<Parameter>,
-    pub return_type: Type,
+    pub return_type: Option<Type>,
     pub body: Vec<Statement<'m>>,
     pub variables: Vec<Rc<Variable>>,
     pub inline: bool,
@@ -90,6 +90,7 @@ pub enum Type {
     Struct(String),
     Array(Box<Type>, usize),
     ArrayRef(Box<Type>, usize),
+    MutArrayRef(Box<Type>, usize),
     Tuple(Vec<Type>),
 }
 
@@ -131,6 +132,7 @@ impl std::fmt::Display for Type {
             Type::Struct(name) => write!(f, "{}", name),
             Type::Array(t, size) => write!(f, "[{}; {}]", t, size),
             Type::ArrayRef(t, size) => write!(f, "&[{}; {}]", t, size),
+            Type::MutArrayRef(t, size) => write!(f, "&mut [{}; {}]", t, size),
             Type::Tuple(items) => {
                 let item_strs: Vec<String> = items.iter().map(|t| format!("{}", t)).collect();
                 write!(f, "({})", item_strs.join(", "))
@@ -267,6 +269,7 @@ pub enum Expression<'m> {
 
     // Take address
     Ref(Box<Expression<'m>>),
+    MutRef(Box<Expression<'m>>),
 
     // Cast expression
     Cast {
@@ -341,7 +344,7 @@ pub enum UnaryOperator {
 }
 
 impl<'m> Function<'m> {
-    pub fn new(name: Option<String>, return_type: Type) -> Self {
+    pub fn new(name: Option<String>, return_type: Option<Type>) -> Self {
         Function {
             name,
             parameters: Vec::new(),

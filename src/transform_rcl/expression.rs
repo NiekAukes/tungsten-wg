@@ -148,14 +148,13 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
                 let onedposition = if index.is_some() {
                     self.convert_expression(index.as_ref().unwrap())
                 } else {
-                    convert_vec3_to_position_expression(
-                        rcl::Expression::Variable(Rc::new(rcl::Variable {
-                            name: Some("pos3".to_string()),
-                            t: rcl::Type::Struct("Pos3".to_string()),
+                    convert_pos3_to_position_expression(rcl::Expression::Variable(Rc::new(
+                        rcl::Variable {
+                            name: Some("p".to_string()),
+                            t: rcl::Type::Struct("PositionIterator".to_string()),
                             mutable: false,
-                        })),
-                        input.dimensions,
-                    )
+                        },
+                    )))
                 };
 
                 rcl::Expression::Index {
@@ -344,57 +343,12 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
     }
 }
 
-fn convert_vec3_to_position_expression<'m>(
-    p: rcl::Expression<'m>,
-    dims: (i32, i32, i32),
-) -> rcl::Expression<'m> {
-    // // simply y * 256 * 16 + z * 256 + x
-    // rcl::Expression::BinaryOp {
-    //     op: rcl::BinaryOperator::Modulo,
-    //     left: Box::new(rcl::Expression::BinaryOp {
-    //         op: rcl::BinaryOperator::Add,
-    //         left: Box::new(rcl::Expression::BinaryOp {
-    //             op: rcl::BinaryOperator::Add,
-    //             left: Box::new(rcl::Expression::BinaryOp {
-    //                 op: rcl::BinaryOperator::Multiply,
-    //                 left: Box::new(rcl::Expression::Field {
-    //                     base: Box::new(p.clone()),
-    //                     field: "y".to_string(),
-    //                 }),
-    //                 right: Box::new(rcl::Expression::IntLiteral(256 * 16)),
-    //             }),
-    //             right: Box::new(rcl::Expression::BinaryOp {
-    //                 op: rcl::BinaryOperator::Multiply,
-    //                 left: Box::new(rcl::Expression::Field {
-    //                     base: Box::new(p.clone()),
-    //                     field: "z".to_string(),
-    //                 }),
-    //                 right: Box::new(rcl::Expression::IntLiteral(256)),
-    //             }),
-    //         }),
-    //         right: Box::new(rcl::Expression::Field {
-    //             base: Box::new(p),
-    //             field: "x".to_string(),
-    //         }),
-    //     }),
-    //     right: Box::new(rcl::Expression::IntLiteral(16 * 256 * 256)),
-    // }
-
+fn convert_pos3_to_position_expression<'m>(p: rcl::Expression<'m>) -> rcl::Expression<'m> {
     // new method: as_index(pos3, x, y)
     rcl::Expression::LateBoundCall {
-        function_name: "as_index".to_string(),
-        argument_types: vec![
-            rcl::Type::Struct("Pos3".to_string()),
-            rcl::Type::I32,
-            rcl::Type::I32,
-            rcl::Type::I32,
-        ],
+        function_name: "index".to_string(),
+        argument_types: vec![rcl::Type::Struct("Pos3".to_string())],
         return_type: rcl::Type::F32,
-        arguments: vec![
-            p,
-            rcl::Expression::I32Literal(dims.0),
-            rcl::Expression::I32Literal(dims.1),
-            rcl::Expression::I32Literal(dims.2),
-        ],
+        arguments: vec![p],
     }
 }

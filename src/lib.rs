@@ -41,15 +41,14 @@ pub fn run_inline_generation(path: &str, base: &str) -> (String, String) {
     let orchestration_arena = bumpalo::Bump::new();
     let orchestration = orchestrate::transform::transform_from_spmt(&program, &orchestration_arena);
     let mut orchestration_conv = OrchestrationConverter::new(&orchestration_arena);
-    orchestration_conv.convert(
-        orchestration.arrange_waves(),
-        orchestration.get_primary_shaders(),
-    );
+    let waves = orchestration.arrange_waves();
+    orchestration_conv.convert(&waves, orchestration.get_primary_shaders());
     let orchestration_rcl = orchestration_conv.finish();
     let orch_output = RustCodeGenerator.generate_inline_module(&orchestration_rcl, "orchestration");
 
     // generate Rust code for the main density functions
-    let rcl_model = transform_rcl::convert_spmt_to_inline_rcl(&program, &orchestration_arena);
+    let rcl_model =
+        transform_rcl::convert_spmt_to_inline_rcl(&program, &waves, &orchestration_arena);
     let rcl_output = RustCodeGenerator.generate_inline_module(&rcl_model, "density_function");
 
     (rcl_output, orch_output)

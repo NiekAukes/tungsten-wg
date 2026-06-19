@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::orchestrate::Scale;
+use crate::orchestrate::model::ShaderDependency;
 use crate::rcl::model as rcl;
 use crate::spmt::model::{self as spmt, Addr, DensityFunctionRef, DensityInput};
 
@@ -215,12 +216,13 @@ pub fn sanitize_name(name: &str) -> String {
 
 pub fn add_density_to_rcl_model<'a, 'm>(
     rcl_model: &mut rcl::RCL<'m>,
-    spmt_df: &'a spmt::DensityFunction<'a>,
+    spmt_df: spmt::DensityFunctionRef<'a>,
+    dimensions: (i32, i32, i32),
     arena: &'m bumpalo::Bump,
     already_converted_functions: HashMap<*const (), rcl::FunctionRef<'m>>,
 ) -> RCLFunctionConverter<'m> {
     let (rcl_funcs, rcl_density, converter, constants) =
-        function::convert_density_function(spmt_df, arena, already_converted_functions);
+        function::convert_density_function(spmt_df, arena, dimensions, already_converted_functions);
     rcl_model.functions.extend(rcl_funcs.into_iter());
     rcl_model.constants.extend(constants.into_iter());
 
@@ -230,18 +232,35 @@ pub fn add_density_to_rcl_model<'a, 'm>(
 
 pub fn convert_spmt_to_inline_rcl<'a, 'm>(
     program: &'a spmt::SPMT<'a>,
+    orchestration: &Vec<Vec<ShaderDependency>>,
     arena: &'m bumpalo::Bump,
 ) -> rcl::RCL<'m> {
     let mut rcl_model = rcl::RCL::new();
     let mut already_converted_functions = HashMap::new();
-    for density_function in &program.density_functions {
+    let mut functions_to_convert = Vec::new();
+
+    for wave in orchestration {
+        for dependency in wave {
+            for df in program
+                .density_functions
+                .iter()
+                .filter(|df| *df.canonical_name.as_ref().unwrap() == dependency.shader.name)
+            {
+                functions_to_convert.push((dependency.dimensions, df));
+            }
+        }
+    }
+
+    for (dimensions, spmt_df) in functions_to_convert {
         let c = add_density_to_rcl_model(
             &mut rcl_model,
-            density_function,
+            *spmt_df,
+            dimensions,
             &arena,
             already_converted_functions,
         );
         already_converted_functions = c.already_converted_functions;
     }
+
     rcl_model
 }
