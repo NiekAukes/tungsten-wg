@@ -14,3 +14,4 @@ pest_derive = "2.8.4"
 md5 = "0.8.0"
 naga = { version = "29.0.0", features = ["wgsl-out", "wgsl-in"] }
 clap = { version = "4.5", features = ["derive"] }
+thiserror = "1.0.40"

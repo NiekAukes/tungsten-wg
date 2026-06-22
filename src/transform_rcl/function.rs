@@ -8,7 +8,6 @@ use std::rc::{self, Rc};
 
 use super::{RCLFunctionConverter, sanitize_name, statement, types};
 use crate::orchestrate::{Flatten, Scale};
-use crate::parse::density;
 use crate::rcl::{Parameter, Type, model as rcl};
 use crate::spmt::model::{self as spmt, Addr, Interned, Name};
 use crate::transform_rcl::InputKey;
