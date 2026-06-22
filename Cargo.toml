@@ -2,16 +2,32 @@
 name = "tungsten-wg"
 version = "0.1.0"
 edition = "2024"
+description = "A compiler / code generator for world generation (Rust and CUDA)."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/NiekAukes/tungsten-wg"
+readme = "README.md"
+keywords = ["minecraft", "worldgen", "compiler", "cuda", "codegen"]
+categories = ["compilers"]
+exclude = [
+    ".git/",
+    ".github/",
+
+    "tests/data/"
+]
+
+[features]
+default = []
 
 [dependencies]
 bumpalo = "3.19.0"
-serde = {version = "1.0.219", features = ["derive"]}
+serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.143"
-pollster = "0.3"
-bytemuck = { version = "1.15", features = ["derive"] }
-pest = "2.8.4"
-pest_derive = "2.8.4"
 md5 = "0.8.0"
-naga = { version = "29.0.0", features = ["wgsl-out", "wgsl-in"] }
-clap = { version = "4.5", features = ["derive"] }
 thiserror = "1.0.40"
+
+pollster = "0.3" 
+bytemuck = { version = "1.15", features = ["derive"] }
+
+[lib]
+name = "tungsten_wg"
+path = "src/lib.rs"

@@ -1,3 +1,13 @@
+//! # Tungsten Worldgen Compiler
+//!
+//! A compiler pipeline for transforming Minecraft world generation algorithms.
+//! This library takes a Single Program Multiple Target (SPMT) Intermediate Representation
+//! of worldgen density functions and compiles them into optimized
+//! target languages, specifically Rust (RCL) and CUDA C++.
+//!
+//! It handles the orchestration of execution waves, ensuring dependencies between
+//! compute shaders/kernels are correctly scheduled and pruned.
+
 #![allow(warnings)]
 
 use bumpalo::Bump;
@@ -5,14 +15,24 @@ use std::collections::HashMap;
 use thiserror::Error;
 
 // --- Modules ---
+
+/// CUDA models and code generation utilities.
 pub mod cuda;
+/// Wave orchestration and execution scheduling logic.
 pub mod orchestrate;
+/// Rust Code Language (RCL) models and inline code generation.
 pub mod rcl;
+/// Single Program Multiple Thread (SPMT) Intermediate Representation definitions.
 pub mod spmt;
+/// Transformations from SPMT IR to CUDA AST.
 pub mod transform_cuda;
+/// Transformations from base orchestration to CUDA-specific orchestration.
 pub mod transform_orchestration_cuda;
+/// Transformations from base orchestration to generalized GPU compute orchestration.
 pub mod transform_orchestration_gpu;
+/// Transformations from base orchestration to RCL orchestration.
 pub mod transform_orchestration_rcl;
+/// Transformations from SPMT IR to RCL AST.
 pub mod transform_rcl;
 
 use crate::{
@@ -23,29 +43,41 @@ use crate::{
     transform_orchestration_rcl::OrchestrationConverter,
 };
 
-// Assuming `Program` is defined in your `spmt` module
 use crate::spmt::model::SPMT as Program;
 
 // --- Error Handling ---
+
+/// Represents errors that can occur during the SPMT compilation process.
 #[derive(Debug, Error)]
 pub enum CompileError {
+    /// Indicates a failure while building or scheduling the execution wave graph.
     #[error("Failed to generate Orchestration code")]
     OrchestrationError,
+    /// Indicates a failure during the CUDA code generation phase.
     #[error("Failed to generate CUDA code")]
     CudaError,
 }
 
+/// A specialized `Result` type for compilation operations.
 pub type Result<T> = std::result::Result<T, CompileError>;
 
 // --- Configuration & Builder ---
 
-/// Configuration options for the code generation step.
+/// Configuration builder for the code generation step.
+///
+/// Use this to toggle specific backends (RCL, CUDA) and override
+/// the default module names generated for the Rust outputs.
 #[derive(Debug, Clone)]
 pub struct CompilerConfig {
+    /// Whether to generate the Rust (RCL) backend.
     pub generate_rcl: bool,
+    /// Whether to generate the generalized GPU orchestrator (currently disabled).
     pub generate_gpu_orchestrator: bool,
+    /// Whether to generate the CUDA C++ backend.
     pub generate_cuda: bool,
+    /// The namespace to use for the RCL density function module.
     pub rcl_density_module_name: String,
+    /// The namespace to use for the RCL orchestration module.
     pub rcl_orchestration_module_name: String,
 }
 
@@ -62,10 +94,12 @@ impl Default for CompilerConfig {
 }
 
 impl CompilerConfig {
+    /// Creates a new configuration with default settings.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Toggles the generation of the Rust Code Layer (RCL) backend.
     pub fn with_rcl(mut self, generate: bool) -> Self {
         self.generate_rcl = generate;
         self
@@ -76,11 +110,17 @@ impl CompilerConfig {
     //     self
     // }
 
+    /// Toggles the generation of the CUDA C++ backend.
     pub fn with_cuda(mut self, generate: bool) -> Self {
         self.generate_cuda = generate;
         self
     }
 
+    /// Overrides the generated module names for the RCL backend.
+    ///
+    /// # Arguments
+    /// * `density` - The name for the module containing mathematical density logic.
+    /// * `orchestration` - The name for the module handling wave dispatch.
     pub fn rcl_module_names(mut self, density: &str, orchestration: &str) -> Self {
         self.rcl_density_module_name = density.to_string();
         self.rcl_orchestration_module_name = orchestration.to_string();
@@ -90,19 +130,32 @@ impl CompilerConfig {
 
 // --- Output Structure ---
 
-/// Holds the generated code strings for whichever backends were enabled.
+/// Holds the generated raw source code strings for whichever backends were enabled
+/// in the [`CompilerConfig`].
 #[derive(Debug, Default)]
 pub struct CompiledOutput {
+    /// The concatenated Rust source code.
+    /// Contains both the density function mathematical logic and the wave orchestration logic.
     pub rcl: Option<String>,
     //pub rcl_orchestration: Option<String>,
     //pub gpu_orchestrator: Option<String>,
+    /// The generated CUDA device C++ code containing the mathematical density kernels.
     pub cuda_density_function: Option<String>,
+    /// The generated CUDA host C++ code handling memory and kernel launch orchestration.
     pub cuda_orchestration: Option<String>,
 }
 
 // --- Main API Entrypoint ---
 
-/// Compiles the provided SPMT program into the configured target languages.
+/// Compiles the provided SPMT program into the target language backends.
+///
+/// # Arguments
+/// * `program` - A reference to the parsed SPMT Intermediate Representation.
+/// * `config` - Defines which languages to compile to and how to format them.
+///
+/// # Returns
+/// A [`CompiledOutput`] struct containing `Some(String)` for every enabled backend,
+/// or a [`CompileError`] if AST transformation fails.
 pub fn compile(program: &Program, config: &CompilerConfig) -> Result<CompiledOutput> {
     let mut output = CompiledOutput::default();
 
@@ -111,7 +164,7 @@ pub fn compile(program: &Program, config: &CompilerConfig) -> Result<CompiledOut
     let orchestration = orchestrate::transform::transform_from_spmt(program, &orchestration_arena);
     let waves = orchestration.arrange_waves();
 
-    // 1. Generate RCL (Rust Code Layer)
+    // 1. Generate Rust
     if config.generate_rcl {
         let mut orchestration_conv = OrchestrationConverter::new(&orchestration_arena);
         orchestration_conv.convert(&waves, orchestration.get_primary_shaders());
@@ -132,8 +185,7 @@ pub fn compile(program: &Program, config: &CompilerConfig) -> Result<CompiledOut
         let rcl_output =
             RustCodeGenerator.generate_inline_module(&rcl_model, &config.rcl_density_module_name);
 
-        //output.rcl_orchestration = Some(orch_output);
-        //output.rcl_density_function = Some(rcl_output);
+        // Concatenate density functions and orchestration into a single generated Rust source
         output.rcl = Some(rcl_output + "\n\n" + &orch_output);
     }
 
@@ -155,6 +207,7 @@ pub fn compile(program: &Program, config: &CompilerConfig) -> Result<CompiledOut
         // 3a. CUDA Density Function Module
         let mut cuda_module = CudaModule::new();
         cuda_module.add_include("\"helpers.cu\"".to_string());
+
         for density_function in &program.density_functions {
             transform_cuda::add_density_to_cuda_module(
                 &mut cuda_module,
@@ -168,6 +221,7 @@ pub fn compile(program: &Program, config: &CompilerConfig) -> Result<CompiledOut
 
         // 3b. CUDA Orchestration Module
         let mut cuda_orchestration_codegen = CudaOrchestrationCodegen::new();
+
         for primary in &orchestration.get_primary_shaders() {
             let pruned_waves = orchestration.arrange_waves_for(primary);
             cuda_orchestration_codegen.convert_single_entry(
