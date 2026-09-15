@@ -63,7 +63,6 @@ impl CudaOrchestrationCodegen {
         }
 
         self.emit_header(&safe_name, grid_x, grid_y, grid_z);
-        self.emit_perm_table_helper();
         self.emit_class_open(&safe_name);
         self.emit_private_fields(&all_shaders, &all_perm_tables);
         self.emit_public_open();
@@ -90,6 +89,7 @@ impl CudaOrchestrationCodegen {
         writeln!(self.code, "#pragma once").unwrap();
         writeln!(self.code).unwrap();
         writeln!(self.code, "#include \"density_function.cu\"").unwrap();
+        writeln!(self.code, "#include \"helpers.cu\"").unwrap();
         writeln!(self.code, "#include <cuda_runtime.h>").unwrap();
         writeln!(self.code, "#include <vector>").unwrap();
         writeln!(self.code, "#include <cstdint>").unwrap();
@@ -106,149 +106,9 @@ impl CudaOrchestrationCodegen {
         .unwrap();
         writeln!(
             self.code,
-            "static const size_t BUFFER_SIZE = (size_t)TOTAL_ELEMENTS * sizeof(float);"
+            "static const size_t BUFFER_SIZE = (size_t)TOTAL_ELEMENTS * sizeof(double);"
         )
         .unwrap();
-        writeln!(self.code).unwrap();
-    }
-
-    /// Emit static C++ helper functions for Minecraft-compatible xoroshiro128++
-    /// permutation table generation.
-    fn emit_perm_table_helper(&mut self) {
-        writeln!(
-            self.code,
-            "// ─── Minecraft Xoroshiro128++ permutation table helper ───────────────────────"
-        )
-        .unwrap();
-        writeln!(
-            self.code,
-            "static inline uint64_t _mc_rotl64(uint64_t x, int k) {{"
-        )
-        .unwrap();
-        writeln!(self.code, "    return (x << k) | (x >> (64 - k));").unwrap();
-        writeln!(self.code, "}}").unwrap();
-        writeln!(self.code).unwrap();
-        writeln!(
-            self.code,
-            "static uint64_t _mc_xoro_next_long(uint64_t* s0, uint64_t* s1) {{"
-        )
-        .unwrap();
-        writeln!(self.code, "    uint64_t l = *s0, m = *s1;").unwrap();
-        writeln!(
-            self.code,
-            "    uint64_t result = _mc_rotl64(l + m, 17) + l;"
-        )
-        .unwrap();
-        writeln!(self.code, "    m ^= l;").unwrap();
-        writeln!(self.code, "    *s0 = _mc_rotl64(l, 49) ^ m ^ (m << 21);").unwrap();
-        writeln!(self.code, "    *s1 = _mc_rotl64(m, 28);").unwrap();
-        writeln!(self.code, "    return result;").unwrap();
-        writeln!(self.code, "}}").unwrap();
-        writeln!(self.code).unwrap();
-        writeln!(
-            self.code,
-            "static int _mc_xoro_next_int(uint64_t* s0, uint64_t* s1, int bound) {{"
-        )
-        .unwrap();
-        writeln!(
-            self.code,
-            "    uint64_t bits = (_mc_xoro_next_long(s0, s1) >> 33) * (uint64_t)bound;"
-        )
-        .unwrap();
-        writeln!(self.code, "    uint64_t lo = bits & 0xFFFFFFFFULL;").unwrap();
-        writeln!(self.code, "    if (lo < (uint64_t)bound) {{").unwrap();
-        writeln!(
-            self.code,
-            "        uint64_t t = (uint64_t)(-(int64_t)bound) & 0xFFFFFFFFULL;"
-        )
-        .unwrap();
-        writeln!(self.code, "        while (lo < t) {{").unwrap();
-        writeln!(
-            self.code,
-            "            bits = (_mc_xoro_next_long(s0, s1) >> 33) * (uint64_t)bound;"
-        )
-        .unwrap();
-        writeln!(self.code, "            lo = bits & 0xFFFFFFFFULL;").unwrap();
-        writeln!(self.code, "        }}").unwrap();
-        writeln!(self.code, "    }}").unwrap();
-        writeln!(self.code, "    return (int)(bits >> 32);").unwrap();
-        writeln!(self.code, "}}").unwrap();
-        writeln!(self.code).unwrap();
-        writeln!(
-            self.code,
-            "static double _mc_xoro_next_double(uint64_t* s0, uint64_t* s1) {{"
-        )
-        .unwrap();
-        writeln!(
-            self.code,
-            "    return (double)(_mc_xoro_next_long(s0, s1) >> 11) * 1.1102230246251565e-16;"
-        )
-        .unwrap();
-        writeln!(self.code, "}}").unwrap();
-        writeln!(self.code).unwrap();
-        writeln!(
-            self.code,
-            "// Generate a 256-element permutation table matching Minecraft's PerlinNoiseSampler."
-        )
-        .unwrap();
-        writeln!(
-            self.code,
-            "// ident_lo/hi and subident_lo/hi are precomputed via MD5(string) at codegen time."
-        )
-        .unwrap();
-        writeln!(self.code, "static void make_perm_table(").unwrap();
-        writeln!(self.code, "    int8_t* out, int64_t world_seed,").unwrap();
-        writeln!(self.code, "    uint64_t ident_lo,    uint64_t ident_hi,").unwrap();
-        writeln!(self.code, "    int64_t  subident_index,").unwrap();
-        writeln!(self.code, "    uint64_t subident_lo, uint64_t subident_hi").unwrap();
-        writeln!(self.code, ") {{").unwrap();
-        writeln!(
-            self.code,
-            "    uint64_t lo = (uint64_t)world_seed ^ ident_lo ^ subident_lo ^ (uint64_t)(subident_index * 2 + 1);"
-        )
-        .unwrap();
-        writeln!(
-            self.code,
-            "    uint64_t hi = (uint64_t)(world_seed >> 32) ^ ident_hi ^ subident_hi;"
-        )
-        .unwrap();
-        writeln!(
-            self.code,
-            "    uint64_t s0 = lo ^ UINT64_C(0x6c62272e07bb0142);"
-        )
-        .unwrap();
-        writeln!(
-            self.code,
-            "    uint64_t s1 = hi ^ UINT64_C(0x62b821756295c58d);"
-        )
-        .unwrap();
-        writeln!(self.code, "    _mc_xoro_next_double(&s0, &s1); // originX").unwrap();
-        writeln!(self.code, "    _mc_xoro_next_double(&s0, &s1); // originY").unwrap();
-        writeln!(self.code, "    _mc_xoro_next_double(&s0, &s1); // originZ").unwrap();
-        writeln!(self.code, "    int8_t table[256];").unwrap();
-        writeln!(
-            self.code,
-            "    for (int i = 0; i < 256; i++) table[i] = (int8_t)i;"
-        )
-        .unwrap();
-        writeln!(self.code, "    for (int i = 0; i < 256; i++) {{").unwrap();
-        writeln!(
-            self.code,
-            "        int j = i + _mc_xoro_next_int(&s0, &s1, 256 - i);"
-        )
-        .unwrap();
-        writeln!(
-            self.code,
-            "        int8_t tmp = table[i]; table[i] = table[j]; table[j] = tmp;"
-        )
-        .unwrap();
-        writeln!(self.code, "    }}").unwrap();
-        writeln!(
-            self.code,
-            "    for (int i = 0; i < 256; i++) out[i] = table[i];"
-        )
-        .unwrap();
-        writeln!(self.code, "}}").unwrap();
         writeln!(self.code).unwrap();
     }
 
@@ -280,7 +140,7 @@ impl CudaOrchestrationCodegen {
         writeln!(self.code, "    // Output buffers (one per kernel)").unwrap();
         for s in shaders {
             let sn = shader_dep_name(s);
-            writeln!(self.code, "    float* d_{}_output;", sn).unwrap();
+            writeln!(self.code, "    double* d_{}_output;", sn).unwrap();
         }
         writeln!(self.code).unwrap();
 
@@ -384,7 +244,7 @@ impl CudaOrchestrationCodegen {
             "    /// Execute the full density pipeline and return the target output."
         )
         .unwrap();
-        writeln!(self.code, "    std::vector<float> run(float3 origin) {{").unwrap();
+        writeln!(self.code, "    std::vector<double> run(double3 origin) {{").unwrap();
         writeln!(self.code, "        const int BLOCK_SIZE = 256;").unwrap();
         writeln!(self.code).unwrap();
 
@@ -420,7 +280,7 @@ impl CudaOrchestrationCodegen {
                 let (ps_x, ps_y, ps_z) = dep.scaled_position.as_float();
                 write!(
                     self.code,
-                    "            {kernel_name}<<<num_blocks, BLOCK_SIZE>>>(\n                make_int3(0, 0, 0), make_int3({dim_x}, {dim_y}, {dim_z}), origin,\n                make_float3({os_x}, {os_y}, {os_z}),\n                make_float3({ps_x}, {ps_y}, {ps_z})"
+                    "            {kernel_name}<<<num_blocks, BLOCK_SIZE>>>(\n                make_int3(0, 0, 0), make_int3({dim_x}, {dim_y}, {dim_z}), origin,\n                make_double3({os_x}, {os_y}, {os_z}),\n                make_double3({ps_x}, {ps_y}, {ps_z})"
                 )
                 .unwrap();
 
@@ -456,12 +316,12 @@ impl CudaOrchestrationCodegen {
         writeln!(self.code, "        // Copy target output to host").unwrap();
         writeln!(
             self.code,
-            "        std::vector<float> result({target_total_elements});"
+            "        std::vector<double> result({target_total_elements});"
         )
         .unwrap();
         writeln!(
             self.code,
-            "        cudaMemcpy(result.data(), d_{target_sn}_output, (size_t){target_total_elements} * sizeof(float), cudaMemcpyDeviceToHost);"
+            "        cudaMemcpy(result.data(), d_{target_sn}_output, (size_t){target_total_elements} * sizeof(double), cudaMemcpyDeviceToHost);"
         )
         .unwrap();
         writeln!(self.code, "        return result;").unwrap();
@@ -492,10 +352,10 @@ impl CudaOrchestrationCodegen {
             .map(random::xoroshiro_seed)
             .unwrap_or((0, 0));
         writeln!(self.code, "        {{").unwrap();
-        writeln!(self.code, "            int8_t h_table[256];").unwrap();
+        writeln!(self.code, "            PerlinNoiseGenerator pns;").unwrap();
         writeln!(
             self.code,
-            "            make_perm_table(h_table, world_seed,"
+            "            make_perm_table(&pns, world_seed,"
         )
         .unwrap();
         writeln!(
@@ -514,12 +374,12 @@ impl CudaOrchestrationCodegen {
         writeln!(self.code, "            );").unwrap();
         writeln!(
             self.code,
-            "            cudaMalloc(&d_{pn}, 256 * sizeof(int8_t));"
+            "            cudaMalloc(&d_{pn}, sizeof(PerlinNoiseGenerator));"
         )
         .unwrap();
         writeln!(
             self.code,
-            "            cudaMemcpy(d_{pn}, h_table, 256 * sizeof(int8_t), cudaMemcpyHostToDevice);"
+            "            cudaMemcpy(d_{pn}, &pns, sizeof(PerlinNoiseGenerator), cudaMemcpyHostToDevice);"
         )
         .unwrap();
         writeln!(self.code, "        }}").unwrap();
@@ -528,9 +388,20 @@ impl CudaOrchestrationCodegen {
     fn emit_perm_table_base3d(&mut self) {
         let pn = builders::perm_table_cuda_param_name(&PermutationTableInput::Base3DNoise);
         writeln!(self.code, "        {{").unwrap();
+        writeln!(self.code, "            InterpolatedNoiseSamplerGPU pns;").unwrap();
         writeln!(
             self.code,
-            "            // Base3DNoise uses a fixed, hardcoded permutation table — no need to allocate or initialize on the GPU."
+            "            create_base3d(&pns, world_seed);"
+        )
+        .unwrap();
+        writeln!(
+            self.code,
+            "            cudaMalloc(&d_{pn}, sizeof(InterpolatedNoiseSamplerGPU));"
+        )
+        .unwrap();
+        writeln!(
+            self.code,
+            "            cudaMemcpy(d_{pn}, &pns, sizeof(InterpolatedNoiseSamplerGPU), cudaMemcpyHostToDevice);"
         )
         .unwrap();
         writeln!(self.code, "        }}").unwrap();

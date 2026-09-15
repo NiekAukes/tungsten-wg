@@ -15,7 +15,7 @@ pub fn convert_type(t: &spmt::VariableType) -> cuda::Type {
         spmt::VariableType::I32 => cuda::Type::Int32,
         spmt::VariableType::I64 => cuda::Type::Int64,
         // CUDA built-in vector types.
-        spmt::VariableType::Vec3 => cuda::Type::Struct("float3".to_string()),
+        spmt::VariableType::Vec3 => cuda::Type::Struct("double3".to_string()),
         spmt::VariableType::Pos3 => cuda::Type::Struct("int3".to_string()),
         // Permutation tables are passed as a raw const pointer.
         spmt::VariableType::PermutationTable => {

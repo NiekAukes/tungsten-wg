@@ -411,7 +411,11 @@ impl CudaCodeGenerator {
                 } else if v.is_nan() {
                     "NAN".to_string()
                 } else {
-                    format!("{}f", v)
+                    if v.fract() == 0.0 {
+                        format!("{}.0f", v)
+                    } else {
+                        format!("{}f", v)
+                    }
                 }
             }
             cuda::Expression::F64Literal(v) => {
@@ -425,7 +429,14 @@ impl CudaCodeGenerator {
                 } else if v.is_nan() {
                     "NAN".to_string()
                 } else {
-                    format!("{}", v)
+                    // make sure to add decimals to all floats like 1.0
+                    //format!("{}", v)
+                    if v.fract() == 0.0 {
+                        format!("{}.0", v)
+                    } else {
+                        format!("{}", v)
+                    }
+
                 }
             }
             cuda::Expression::BoolLiteral(v) => format!("{}", v),

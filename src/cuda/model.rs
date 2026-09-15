@@ -63,6 +63,8 @@ pub enum Type {
     Float4,
     Int2,
     Int4,
+    Double2,
+    Double4,
 
     // --- Composite types ------------------------------------------------
     /// Raw (non-const) pointer.
@@ -119,6 +121,8 @@ impl std::fmt::Display for Type {
             Type::Float4 => write!(f, "float4"),
             Type::Int2 => write!(f, "int2"),
             Type::Int4 => write!(f, "int4"),
+            Type::Double2 => write!(f, "double2"),
+            Type::Double4 => write!(f, "double4"),
             Type::Pointer(t) => write!(f, "{}*", t),
             Type::ConstPointer(t) => write!(f, "const {}*", t),
             Type::Array(t, size) => write!(f, "{}[{}]", t, size),

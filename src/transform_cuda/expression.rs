@@ -144,7 +144,7 @@ impl<'a, 'm> CudaFunctionConverter<'m> {
                 let converted_args = args.iter().map(|a| self.convert_expression(a)).collect();
                 // Map to CUDA built-in constructor functions.
                 let func_name = match t {
-                    spmt::VariableType::Vec3 => "make_float3",
+                    spmt::VariableType::Vec3 => "make_double3",
                     spmt::VariableType::Pos3 => "make_int3",
                     _ => panic!("Cannot construct {:?} with Construct expression", t),
                 };

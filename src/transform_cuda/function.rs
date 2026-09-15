@@ -32,7 +32,7 @@ pub fn convert_function<'a, 'm>(
     let mut cuda_func = cuda::CudaFunction::new(
         cuda::FunctionQualifier::Device,
         spmt_func.canonical_name.as_deref().map(sanitize_name),
-        cuda::Type::Float,
+        cuda::Type::Double,
     );
 
     // Parameters from the SPMT function signature.
@@ -108,7 +108,7 @@ pub fn convert_density_function<'a, 'm>(
         };
         let param = cuda::Parameter {
             name: param_name.clone(),
-            t: cuda::Type::ConstPointer(Box::new(cuda::Type::Float)),
+            t: cuda::Type::ConstPointer(Box::new(cuda::Type::Double)),
             is_const: true,
         };
         density_input_params.insert(InputKey::from(input), param);
@@ -147,9 +147,9 @@ pub fn convert_density_function<'a, 'm>(
     // Standard parameters:
     //   int3 base_pos         — bottom-left voxel coordinate of this batch
     //   int3 dimensions       — size of the output volume (x * y * z threads)
-    //   float3 origin         — world-space origin offset (passed into the body as `origin`)
-    //   float3 origin_scale   — per-axis scale applied to the origin
-    //   float3 position_scale — per-axis scale applied to the position
+    //   double3 origin         — world-space origin offset (passed into the body as `origin`)
+    //   double3 origin_scale   — per-axis scale applied to the origin
+    //   double3 position_scale — per-axis scale applied to the position
     kernel.add_parameter(
         "base_pos".to_string(),
         cuda::Type::Struct("int3".to_string()),
@@ -162,17 +162,17 @@ pub fn convert_density_function<'a, 'm>(
     );
     kernel.add_parameter(
         "origin".to_string(),
-        cuda::Type::Struct("float3".to_string()),
+        cuda::Type::Struct("double3".to_string()),
         false,
     );
     kernel.add_parameter(
         "origin_scale".to_string(),
-        cuda::Type::Struct("float3".to_string()),
+        cuda::Type::Struct("double3".to_string()),
         false,
     );
     kernel.add_parameter(
         "position_scale".to_string(),
-        cuda::Type::Struct("float3".to_string()),
+        cuda::Type::Struct("double3".to_string()),
         false,
     );
 
@@ -194,7 +194,7 @@ pub fn convert_density_function<'a, 'm>(
     // Output pointer: `double* output`
     kernel.add_parameter(
         "output".to_string(),
-        cuda::Type::Pointer(Box::new(cuda::Type::Float)),
+        cuda::Type::Pointer(Box::new(cuda::Type::Double)),
         false,
     );
 
@@ -251,7 +251,7 @@ pub fn convert_density_function<'a, 'm>(
     // A `result` variable to capture the return value from the body.
     let result_var = Rc::new(cuda::Variable {
         name: spmt::Name::Named("result".to_string()),
-        t: cuda::Type::Float,
+        t: cuda::Type::Double,
         memory_qualifier: None,
     });
     kernel.add_statement(cuda::Statement::Declare {
