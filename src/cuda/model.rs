@@ -214,10 +214,9 @@ impl CudaStruct {
 /// and an initializer expression.
 #[derive(Debug, Clone)]
 pub struct GlobalVar<'m> {
-    pub name: String,
-    pub t: Type,
-    pub qualifier: Option<MemoryQualifier>,
+    pub inner: Rc<Variable>,
     pub init: Option<Expression<'m>>,
+    pub is_const: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -238,7 +237,7 @@ pub struct Parameter {
 pub struct Variable {
     pub name: Name,
     pub t: Type,
-    pub memory_qualifier: Option<MemoryQualifier>,
+    pub qualifiers: Vec<MemoryQualifier>,
 }
 
 /// A CUDA function definition (kernel or device helper).
@@ -254,12 +253,14 @@ pub struct CudaFunction<'m> {
     pub variables: Vec<Rc<Variable>>,
     pub is_inline: bool,
     pub is_extern_c: bool,
+
+    pub source_hash: u64,
 }
 
 pub type FunctionRef<'m> = Interned<'m, CudaFunction<'m>>;
 
 impl<'m> CudaFunction<'m> {
-    pub fn new(qualifier: FunctionQualifier, name: Option<String>, return_type: Type) -> Self {
+    pub fn new(qualifier: FunctionQualifier, name: Option<String>, return_type: Type, source_hash: u64) -> Self {
         CudaFunction {
             qualifier,
             name,
@@ -270,6 +271,7 @@ impl<'m> CudaFunction<'m> {
             variables: Vec::new(),
             is_inline: false,
             is_extern_c: false,
+            source_hash,
         }
     }
 
@@ -283,6 +285,10 @@ impl<'m> CudaFunction<'m> {
 
     pub fn add_variable(&mut self, variable: Rc<Variable>) {
         self.variables.push(variable);
+    }
+
+    pub fn set_source_hash(&mut self, source_hash: u64) {
+        self.source_hash = source_hash;
     }
 }
 

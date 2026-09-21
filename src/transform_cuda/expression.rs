@@ -125,7 +125,7 @@ impl<'a, 'm> CudaFunctionConverter<'m> {
                     base: Box::new(cuda::Expression::Variable(Rc::new(cuda::Variable {
                         name: spmt::Name::Named(param.name),
                         t: param.t,
-                        memory_qualifier: None,
+                        qualifiers: vec![],
                     }))),
                     index: Box::new(flat_index),
                 }
@@ -136,7 +136,7 @@ impl<'a, 'm> CudaFunctionConverter<'m> {
                 cuda::Expression::Variable(Rc::new(cuda::Variable {
                     name: spmt::Name::Named(permutation_table_param_name(input)),
                     t: cuda::Type::ConstPointer(Box::new(cuda::Type::Int8)),
-                    memory_qualifier: None,
+                    qualifiers: vec![],
                 }))
             }
 
@@ -260,6 +260,6 @@ fn pos3_var<'m>() -> cuda::Expression<'m> {
     cuda::Expression::Variable(Rc::new(cuda::Variable {
         name: spmt::Name::Named("pos3".to_string()),
         t: cuda::Type::Struct("int3".to_string()),
-        memory_qualifier: None,
+        qualifiers: vec![],
     }))
 }

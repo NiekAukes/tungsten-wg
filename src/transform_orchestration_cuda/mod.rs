@@ -61,6 +61,7 @@ impl CudaOrchestrationCodegen {
                 }
             }
         }
+        all_perm_tables.sort();
 
         self.emit_header(&safe_name, grid_x, grid_y, grid_z);
         self.emit_class_open(&safe_name);
@@ -360,14 +361,14 @@ impl CudaOrchestrationCodegen {
         .unwrap();
         writeln!(
             self.code,
-            "                UINT64_C(0x{:016x}), UINT64_C(0x{:016x}), // ident: \"{}\"",
+            "                INT64_C(0x{:016x}), INT64_C(0x{:016x}), // ident: \"{}\"",
             ident_seed.0, ident_seed.1, ident_name
         )
         .unwrap();
         writeln!(self.code, "                INT64_C({}),", subident_index).unwrap();
         writeln!(
             self.code,
-            "                UINT64_C(0x{:016x}), UINT64_C(0x{:016x})  // subident: {}",
+            "                INT64_C(0x{:016x}), INT64_C(0x{:016x})  // subident: {}",
             subident_lo, subident_hi, subident_name
         )
         .unwrap();

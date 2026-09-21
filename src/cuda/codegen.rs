@@ -86,12 +86,25 @@ impl CudaCodeGenerator {
     // -----------------------------------------------------------------------
 
     fn generate_global_var(&self, p: &mut Printer, gv: &cuda::GlobalVar<'_>) {
-        if let Some(q) = &gv.qualifier {
-            p.push(&format!("{} ", q));
+        for qualifier in &gv.inner.qualifiers {
+            p.push(&format!("{} ", qualifier));
         }
-        p.push(&self.type_to_string(&gv.t));
+        if gv.is_const {
+            p.push("const ");
+        }
+        p.push(&self.type_to_string(&gv.inner.t));
+        // variable suffix for arrays. like [2]
+        let var_suffix = self.var_suffix_if_neccesary(&gv.inner.t);
         p.push(" ");
-        p.push(&gv.name);
+        let name = match &gv.inner.name {
+            crate::spmt::model::Name::Anonymous => sanitize_name(&p.anon_name(gv.inner.clone(), "var")),
+            crate::spmt::model::Name::Prefixed(prefix) => {
+                sanitize_name(&p.anon_name(gv.inner.clone(), &prefix))
+            }
+            crate::spmt::model::Name::Named(n) => sanitize_name(n),
+        };
+        p.push(&name);
+        p.push(&var_suffix);
         if let Some(init) = &gv.init {
             p.push(" = ");
             let init_str = self.expression_to_string(p, init);
@@ -178,8 +191,8 @@ impl CudaCodeGenerator {
     }
 
     fn generate_local_var_decl(&self, p: &mut Printer, v: &std::rc::Rc<cuda::Variable>) {
-        if let Some(q) = &v.memory_qualifier {
-            p.push(&format!("{} ", q));
+        for qualifier in &v.qualifiers {
+            p.push(&format!("{} ", qualifier));
         }
         let name = match &v.name {
             crate::spmt::model::Name::Anonymous => sanitize_name(&p.anon_name(v.clone(), "var")),
@@ -309,8 +322,8 @@ impl CudaCodeGenerator {
                 init,
                 is_const,
             } => {
-                if let Some(q) = &variable.memory_qualifier {
-                    p.push(&format!("{} ", q));
+                for qualifier in &variable.qualifiers {
+                    p.push(&format!("{} ", qualifier));
                 }
                 if *is_const {
                     p.push("const ");
@@ -370,9 +383,10 @@ impl CudaCodeGenerator {
                 is_const,
             } => {
                 let qualifier = variable
-                    .memory_qualifier
+                    .qualifiers
+                    .iter()
                     .map(|q| format!("{} ", q))
-                    .unwrap_or_default();
+                    .collect::<String>();
                 let const_prefix = if *is_const { "const " } else { "" };
                 let name = self.variable_name(variable, p);
                 let decl = self.type_decl_string(&variable.t, &name);
@@ -550,7 +564,17 @@ impl CudaCodeGenerator {
     }
 
     fn type_to_string(&self, t: &cuda::Type) -> String {
-        format!("{}", t)
+        match t {
+            cuda::Type::Array(inner, n) => format!("{}", self.type_to_string(inner)),
+            _ => format!("{}", t)
+        }
+        
+    }
+    fn var_suffix_if_neccesary(&self, t: &cuda::Type) -> String {
+        match t {
+            cuda::Type::Array(_, n) => format!("[{}]", n),
+            _ => "".to_string(),
+        }
     }
 
     /// Generate the C/C++ declarator string for a variable of type `t` named `name`.

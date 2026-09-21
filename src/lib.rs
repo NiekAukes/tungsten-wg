@@ -36,11 +36,7 @@ pub mod transform_orchestration_rcl;
 pub mod transform_rcl;
 
 use crate::{
-    cuda::{codegen::CudaCodeGenerator, model::CudaModule},
-    rcl::codegen::RustCodeGenerator,
-    transform_orchestration_cuda::CudaOrchestrationCodegen,
-    transform_orchestration_gpu::GpuOrchestrationCodegen,
-    transform_orchestration_rcl::OrchestrationConverter,
+    cuda::{codegen::CudaCodeGenerator, model::CudaModule}, rcl::codegen::RustCodeGenerator, spmt::{normalize::NormalizedSPMT, pretty::Printer}, transform_orchestration_cuda::CudaOrchestrationCodegen, transform_orchestration_gpu::GpuOrchestrationCodegen, transform_orchestration_rcl::OrchestrationConverter
 };
 
 use crate::spmt::model::SPMT as Program;
@@ -75,6 +71,8 @@ pub struct CompilerConfig {
     pub generate_gpu_orchestrator: bool,
     /// Whether to generate the CUDA C++ backend.
     pub generate_cuda: bool,
+    /// Whether to generate the wave orchestration graph.
+    pub generate_wave_orchestration_graph: bool,
     /// The namespace to use for the RCL density function module.
     pub rcl_density_module_name: String,
     /// The namespace to use for the RCL orchestration module.
@@ -89,6 +87,7 @@ impl Default for CompilerConfig {
             generate_cuda: false,
             rcl_density_module_name: "density_function".to_string(),
             rcl_orchestration_module_name: "orchestration".to_string(),
+            generate_wave_orchestration_graph: false,
         }
     }
 }
@@ -113,6 +112,12 @@ impl CompilerConfig {
     /// Toggles the generation of the CUDA C++ backend.
     pub fn with_cuda(mut self, generate: bool) -> Self {
         self.generate_cuda = generate;
+        self
+    }
+
+    /// Toggles the generation of the wave orchestration graph.
+    pub fn with_wave_orchestration_graph(mut self, generate: bool) -> Self {
+        self.generate_wave_orchestration_graph = generate;
         self
     }
 
@@ -143,6 +148,9 @@ pub struct CompiledOutput {
     pub cuda_density_function: Option<String>,
     /// The generated CUDA host C++ code handling memory and kernel launch orchestration.
     pub cuda_orchestration: Option<String>,
+
+    /// The generated wave orchestration graph.
+    pub wave_orchestration_graph: Option<String>,
 }
 
 // --- Main API Entrypoint ---
@@ -163,6 +171,13 @@ pub fn compile(program: &Program, config: &CompilerConfig) -> Result<CompiledOut
     let orchestration_arena = Bump::new();
     let orchestration = orchestrate::transform::transform_from_spmt(program, &orchestration_arena);
     let waves = orchestration.arrange_waves();
+
+    if config.generate_wave_orchestration_graph {
+        let mut printer = Printer::new();
+        orchestration.pretty_wave_dependencies(&mut printer);
+        let wave_graph = printer.finish();
+        output.wave_orchestration_graph = Some(wave_graph);
+    }
 
     // 1. Generate Rust
     if config.generate_rcl {
@@ -208,7 +223,7 @@ pub fn compile(program: &Program, config: &CompilerConfig) -> Result<CompiledOut
         let mut cuda_module = CudaModule::new();
         cuda_module.add_include("\"helpers.cu\"".to_string());
 
-        for density_function in &program.density_functions {
+        for density_function in &program.normal_density_list() {
             transform_cuda::add_density_to_cuda_module(
                 &mut cuda_module,
                 density_function,

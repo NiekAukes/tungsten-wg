@@ -9,6 +9,7 @@ use std::rc::Rc;
 use super::{CudaFunctionConverter, InputKey, sanitize_name};
 use crate::cuda::model as cuda;
 use crate::spmt::model::{self as spmt, Addr, Interned};
+use crate::spmt::normalize::{NormalizedDensityFunction, NormalizedFunction};
 use crate::transform_cuda::types::{convert_type, permutation_table_param_name};
 
 // ---------------------------------------------------------------------------
@@ -33,6 +34,7 @@ pub fn convert_function<'a, 'm>(
         cuda::FunctionQualifier::Device,
         spmt_func.canonical_name.as_deref().map(sanitize_name),
         cuda::Type::Double,
+        0,
     );
 
     // Parameters from the SPMT function signature.
@@ -56,7 +58,7 @@ pub fn convert_function<'a, 'm>(
         let cuda_var = Rc::new(cuda::Variable {
             name: var.name.clone(),
             t: convert_type(&var.t),
-            memory_qualifier: None,
+            qualifiers: vec![],
         });
         converter.register_variable(var.clone(), cuda_var.clone());
         cuda_func.add_variable(cuda_var);
@@ -91,16 +93,14 @@ pub fn convert_density_function<'a, 'm>(
     spmt_df: &'a spmt::DensityFunction<'a>,
     arena: &'m bumpalo::Bump,
     already_converted_functions: HashMap<*const (), cuda::FunctionRef<'m>>,
-) -> (
-    Vec<cuda::FunctionRef<'m>>,
-    cuda::FunctionRef<'m>,
-    CudaFunctionConverter<'m>,
-) {
+    cuda_module: &mut cuda::CudaModule<'m>,
+) -> CudaFunctionConverter<'m> {
     let mut device_funcs: Vec<cuda::FunctionRef<'m>> = Vec::new();
 
     // ── Build the density-input parameter map ────────────────────────────
     let mut density_input_params: HashMap<InputKey, cuda::Parameter> = HashMap::new();
-    for (i, input) in spmt_df.density_inputs.iter().enumerate() {
+    let mut input_key_order = Vec::new();
+    for (i, input) in spmt_df.normal_density_inputs().iter().enumerate() {
         let param_name = match &input.var.name {
             spmt::Name::Named(n) => sanitize_name(n),
             spmt::Name::Prefixed(n) => format!("{}_{}", sanitize_name(n), i),
@@ -112,6 +112,7 @@ pub fn convert_density_function<'a, 'm>(
             is_const: true,
         };
         density_input_params.insert(InputKey::from(input), param);
+        input_key_order.push(InputKey::from(input));
     }
     let density_inputs = Rc::new(density_input_params);
 
@@ -121,6 +122,7 @@ pub fn convert_density_function<'a, 'm>(
     converter.already_converted_functions = already_converted_functions;
 
     // ── Convert helper (__device__) functions ────────────────────────────
+    // TODO: normalize order of helper functions
     for helper in &spmt_df.helper_functions {
         let (func_ref, fconv) = convert_function(
             helper,
@@ -142,6 +144,7 @@ pub fn convert_density_function<'a, 'm>(
         cuda::FunctionQualifier::Global,
         kernel_name,
         cuda::Type::Void,
+        spmt_df.source_hash,
     );
 
     // Standard parameters:
@@ -177,12 +180,13 @@ pub fn convert_density_function<'a, 'm>(
     );
 
     // Density input pointers: `const double* input_N`
-    for (_, param) in density_inputs.as_ref() {
+    for key in input_key_order.iter() {
+        let param = density_inputs.get(key).unwrap();
         kernel.add_parameter(param.name.clone(), param.t.clone(), param.is_const);
     }
 
     // Permutation table pointers: `const int8_t* perm_table_X`
-    for perm in &spmt_df.permutation_table_inputs {
+    for perm in &spmt_df.normal_permutation_table_inputs() {
         let name = permutation_table_param_name(perm);
         kernel.add_parameter(
             name,
@@ -222,37 +226,45 @@ pub fn convert_density_function<'a, 'm>(
     ));
 
     // Register local variables from the SPMT density function.
-    for var in &spmt_df.variables {
+    for var in &spmt_df.normal_variables() {
         let cuda_var = Rc::new(cuda::Variable {
             name: var.name.clone(),
             t: convert_type(&var.t),
-            memory_qualifier: None,
+            qualifiers: vec![],
         });
         converter.register_variable(var.clone(), cuda_var.clone());
         kernel.add_variable(cuda_var);
     }
 
     // Emit constant array declarations with their initializers.
-    for (var, init_expr) in &spmt_df.constants {
+    for (var, init_expr) in spmt_df.normal_constants().iter() {
         let cuda_var = Rc::new(cuda::Variable {
             name: var.name.clone(),
             t: convert_type(&var.t),
-            memory_qualifier: None,
+            qualifiers: vec![cuda::MemoryQualifier::Constant, cuda::MemoryQualifier::Device],
         });
+        // importantly, do not add the variable to the function's local scope; it will be a global constant.s
         converter.register_variable(var.clone(), cuda_var.clone());
         let init = converter.convert_expression(init_expr);
-        kernel.add_statement(cuda::Statement::Declare {
-            variable: cuda_var,
+        // kernel.add_statement(cuda::Statement::Declare {
+        //     variable: cuda_var,
+        //     init: Some(init),
+        //     is_const: true,
+        // });
+        // Add the constant variable to the cuda module
+        let global = cuda::GlobalVar {
+            inner: cuda_var.clone(),
             init: Some(init),
             is_const: true,
-        });
+        };
+        cuda_module.add_global_var(global);
     }
 
     // A `result` variable to capture the return value from the body.
     let result_var = Rc::new(cuda::Variable {
         name: spmt::Name::Named("result".to_string()),
         t: cuda::Type::Double,
-        memory_qualifier: None,
+        qualifiers: vec![],
     });
     kernel.add_statement(cuda::Statement::Declare {
         variable: result_var.clone(),
@@ -277,7 +289,12 @@ pub fn convert_density_function<'a, 'm>(
         .already_converted_functions
         .insert(spmt_df.addr(), kernel_ref);
 
-    (device_funcs, kernel_ref, converter)
+    for f in device_funcs {
+        cuda_module.add_device_function(f);
+    }
+    cuda_module.add_kernel(kernel_ref);
+
+    converter
 }
 
 // ---------------------------------------------------------------------------

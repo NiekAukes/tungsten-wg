@@ -113,7 +113,7 @@ impl<'m> CudaFunctionConverter<'m> {
             let cuda_var = Rc::new(cuda::Variable {
                 name: spmt::Name::Named(param.name.clone()),
                 t: param.t.clone(),
-                memory_qualifier: None,
+                qualifiers: vec![],
             });
             var_map.insert(*key, cuda_var);
         }
@@ -144,7 +144,7 @@ impl<'m> CudaFunctionConverter<'m> {
         let var = Rc::new(cuda::Variable {
             name: spmt_var.name.clone(),
             t: crate::transform_cuda::types::convert_type(&spmt_var.t),
-            memory_qualifier: None,
+            qualifiers: vec![],
         });
         self.var_map.insert(key, var.clone());
         var
@@ -188,12 +188,5 @@ pub fn add_density_to_cuda_module<'a, 'm>(
     arena: &'m bumpalo::Bump,
     already_converted_functions: HashMap<*const (), cuda::FunctionRef<'m>>,
 ) -> CudaFunctionConverter<'m> {
-    let (device_funcs, kernel, converter) =
-        function::convert_density_function(spmt_df, arena, already_converted_functions);
-
-    for f in device_funcs {
-        cuda_module.add_device_function(f);
-    }
-    cuda_module.add_kernel(kernel);
-    converter
+        function::convert_density_function(spmt_df, arena, already_converted_functions,cuda_module)
 }

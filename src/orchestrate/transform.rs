@@ -86,6 +86,7 @@ impl<'m, 'a> Transformer<'a, 'm> {
             source,
             inputs: dependencies,
             permutation_tables: density_function.permutation_table_inputs.clone(),
+            source_hash: density_function.source_hash,
         };
         let shader_ref = self.orchestration.add_shader(shader);
         self.cache.insert(density_function, shader_ref);

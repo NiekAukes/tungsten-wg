@@ -356,6 +356,11 @@ impl<'m> Function<'m> {
     }
 
     pub fn add_parameter(&mut self, name: String, t: Type) {
+        for param in &self.parameters {
+            if param.name == name {
+                panic!("Parameter already exists: {}", name);
+            }
+        }
         self.parameters.push(Parameter { name, t });
     }
 
@@ -364,6 +369,15 @@ impl<'m> Function<'m> {
     }
 
     pub fn add_variable(&mut self, variable: Rc<Variable>) {
+        // debug check!
+        for var in &self.variables {
+            if Rc::ptr_eq(var, &variable) {
+                panic!("Variable already exists: {:?}", variable);
+            }
+            if var.name == variable.name {
+                panic!("Variable with the same name already exists: {:?}", variable);
+            }
+        }
         self.variables.push(variable);
     }
 }
@@ -377,6 +391,12 @@ impl Struct {
     }
 
     pub fn add_field(&mut self, name: String, t: Type) {
+        for field in &self.fields {
+            if field.0 == name {
+                panic!("Field already exists: {}", name);
+            }
+        }
+        
         self.fields.push((name, t));
     }
 }
@@ -393,6 +413,11 @@ impl<'m> RCL<'m> {
     }
 
     pub fn add_import(&mut self, import: String) {
+        for existing_import in &self.import_statements {
+            if existing_import == &import {
+                panic!("Import already exists: {}", import);
+            }
+        }
         self.import_statements.push(import);
     }
 }

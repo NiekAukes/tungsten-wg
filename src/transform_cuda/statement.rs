@@ -77,7 +77,7 @@ impl<'a, 'm> CudaFunctionConverter<'m> {
                 let counter_var = Rc::new(cuda::Variable {
                     name: spmt::Name::Named("__repeat_i".to_string()),
                     t: cuda::Type::Int32,
-                    memory_qualifier: None,
+                    qualifiers: vec![],
                 });
                 let init = cuda::Statement::Declare {
                     variable: counter_var.clone(),

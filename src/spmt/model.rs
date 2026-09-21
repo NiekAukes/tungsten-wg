@@ -32,6 +32,9 @@ pub struct DensityFunction<'m> {
     pub variables: Vec<Var<'m>>,
     pub helper_functions: Vec<FunctionRef<'m>>,
     pub constants: Vec<(Var<'m>, Expression<'m>)>,
+
+    /// An identifier for the source of this density function, used to detect changes and cache results.
+    pub source_hash: u64, 
 }
 
 #[derive(Debug, Clone)]
@@ -65,6 +68,26 @@ pub enum PermutationTableInput {
     Base3DNoise,
 }
 
+impl Ord for PermutationTableInput {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use PermutationTableInput::*;
+        match (self, other) {
+            (PerlinNoise { ident: i1, subident: s1, subident_index: idx1 }, PerlinNoise { ident: i2, subident: s2, subident_index: idx2 }) => {
+                i1.cmp(i2).then_with(|| s1.cmp(s2)).then_with(|| idx1.cmp(idx2))
+            }
+            (PerlinNoise { .. }, Base3DNoise) => std::cmp::Ordering::Less,
+            (Base3DNoise, PerlinNoise { .. }) => std::cmp::Ordering::Greater,
+            (Base3DNoise, Base3DNoise) => std::cmp::Ordering::Equal,
+        }
+    }
+}
+
+impl PartialOrd for PermutationTableInput {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Variable {
     pub name: Name,
@@ -76,6 +99,27 @@ pub enum Name {
     Anonymous,        // for variables that don't have a name (e.g. temporary variables)
     Prefixed(String), // for variables that have a name, but it's not guaranteed to be unique
     Named(String),    // for variables that have a unique name
+}
+
+impl Ord for Name {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use Name::*;
+        match (self, other) {
+            (Anonymous, Anonymous) => std::cmp::Ordering::Equal,
+            (Anonymous, _) => std::cmp::Ordering::Less,
+            (_, Anonymous) => std::cmp::Ordering::Greater,
+            (Prefixed(s1), Prefixed(s2)) => s1.cmp(s2),
+            (Prefixed(_), Named(_)) => std::cmp::Ordering::Less,
+            (Named(_), Prefixed(_)) => std::cmp::Ordering::Greater,
+            (Named(s1), Named(s2)) => s1.cmp(s2),
+        }
+    }
+}
+
+impl PartialOrd for Name {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -285,15 +329,6 @@ impl<'m> Function<'m> {
     }
 }
 
-impl<'m> DensityFunction<'m> {
-    pub fn add_statement(&mut self, statement: Statement<'m>) {
-        self.body.push(statement);
-    }
-    pub fn add_variable(&mut self, variable: Var<'m>) {
-        self.variables.push(variable);
-    }
-}
-
 pub trait Addr {
     fn addr(&self) -> *const ();
 }
@@ -314,5 +349,29 @@ impl<T> Addr for std::rc::Rc<T> {
 impl<T> Addr for Interned<'_, T> {
     fn addr(&self) -> *const () {
         self.0 as *const T as *const ()
+    }
+}
+
+impl<'m> DensityFunction<'m> {
+    pub fn add_statement(&mut self, statement: Statement<'m>) {
+        self.body.push(statement);
+    }
+
+    pub fn add_variable(&mut self, variable: Var<'m>) {
+        for var in &self.variables {
+            if var.name == variable.name {
+                panic!("Variable with the same name already exists");
+            }
+        }
+        self.variables.push(variable);
+    }
+
+    pub fn add_density_input(&mut self, dependency: DensityInput<'m>) {
+        for input in &self.density_inputs {
+            if input.density_function == dependency.density_function {
+                return;
+            }
+        }
+        self.density_inputs.push(dependency);
     }
 }

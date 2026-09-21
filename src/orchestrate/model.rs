@@ -22,6 +22,7 @@ pub struct Shader<'a> {
     pub source: String,
     pub inputs: Vec<ShaderDependency<'a>>,
     pub permutation_tables: Vec<PermutationTableInput>,
+    pub source_hash: u64,
 }
 
 pub struct Orchestration<'a> {
