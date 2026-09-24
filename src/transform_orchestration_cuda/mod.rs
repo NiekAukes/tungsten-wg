@@ -131,6 +131,11 @@ impl CudaOrchestrationCodegen {
         writeln!(self.code, "    int3   grid_size;").unwrap();
         writeln!(self.code, "    int    total_elements;").unwrap();
         writeln!(self.code, "    size_t buffer_size;").unwrap();
+        writeln!(
+            self.code,
+            "    cudaStream_t stream; // dedicated stream so instances run concurrently"
+        )
+        .unwrap();
         writeln!(self.code).unwrap();
     }
 
@@ -183,6 +188,7 @@ impl CudaOrchestrationCodegen {
         .unwrap();
         writeln!(self.code, "        total_elements = TOTAL_ELEMENTS;").unwrap();
         writeln!(self.code, "        buffer_size    = BUFFER_SIZE;").unwrap();
+        writeln!(self.code, "        cudaStreamCreate(&stream);").unwrap();
         writeln!(self.code).unwrap();
 
         writeln!(self.code, "        // Allocate output buffers").unwrap();
@@ -230,6 +236,7 @@ impl CudaOrchestrationCodegen {
             let pn = builders::perm_table_cuda_param_name(pt);
             writeln!(self.code, "        cudaFree(d_{pn});").unwrap();
         }
+        writeln!(self.code, "        cudaStreamDestroy(stream);").unwrap();
         writeln!(self.code, "    }}").unwrap();
         writeln!(self.code).unwrap();
     }
@@ -282,7 +289,7 @@ impl CudaOrchestrationCodegen {
                 let (ps_x, ps_y, ps_z) = dep.scaled_position.as_float();
                 write!(
                     self.code,
-                    "            {kernel_name}<<<num_blocks, BLOCK_SIZE>>>(\n                make_int3(0, 0, 0), make_int3({dim_x}, {dim_y}, {dim_z}), origin,\n                make_double3({os_x}, {os_y}, {os_z}),\n                make_double3({ps_x}, {ps_y}, {ps_z})"
+                    "            {kernel_name}<<<num_blocks, BLOCK_SIZE, 0, stream>>>(\n                make_int3(0, 0, 0), make_int3({dim_x}, {dim_y}, {dim_z}), origin,\n                make_double3({os_x}, {os_y}, {os_z}),\n                make_double3({ps_x}, {ps_y}, {ps_z})"
                 )
                 .unwrap();
 
@@ -307,7 +314,7 @@ impl CudaOrchestrationCodegen {
                 writeln!(self.code, "        }}").unwrap();
             }
 
-            writeln!(self.code, "        cudaDeviceSynchronize();").unwrap();
+            writeln!(self.code, "        cudaStreamSynchronize(stream);").unwrap();
             writeln!(self.code).unwrap();
         }
 
@@ -323,9 +330,10 @@ impl CudaOrchestrationCodegen {
         .unwrap();
         writeln!(
             self.code,
-            "        cudaMemcpy(result.data(), d_{target_sn}_output, (size_t){target_total_elements} * sizeof(double), cudaMemcpyDeviceToHost);"
+            "        cudaMemcpyAsync(result.data(), d_{target_sn}_output, (size_t){target_total_elements} * sizeof(double), cudaMemcpyDeviceToHost, stream);"
         )
         .unwrap();
+        writeln!(self.code, "        cudaStreamSynchronize(stream);").unwrap();
         writeln!(self.code, "        return result;").unwrap();
         writeln!(self.code, "    }}").unwrap();
         writeln!(self.code).unwrap();
