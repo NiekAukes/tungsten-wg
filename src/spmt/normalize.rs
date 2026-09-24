@@ -97,7 +97,7 @@ impl<'m> NormalizedFunction<'m> for super::model::Function<'m> {
 
 impl<'m> NormalizedShaderInput<'m> for ShaderDependency<'m> {
     fn normal_shader_dependency_list(&self) -> Vec<ShaderDependency<'m>> {
-        let mut list = vec![self.clone()];
+        let mut list = self.shader.inputs.clone();
         list.sort_by(|a, b| a.shader.source_hash.cmp(&b.shader.source_hash));
         list
     }

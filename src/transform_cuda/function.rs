@@ -186,7 +186,7 @@ pub fn convert_density_function<'a, 'm>(
     }
 
     // Permutation table pointers: `const int8_t* perm_table_X`
-    for perm in &spmt_df.normal_permutation_table_inputs() {
+    for perm in &spmt_df.permutation_table_inputs {
         let name = permutation_table_param_name(perm);
         kernel.add_parameter(
             name,

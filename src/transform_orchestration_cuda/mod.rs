@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
+use crate::spmt::normalize::NormalizedShaderInput;
 use crate::{
     orchestrate::{Flatten, model::ShaderDependency},
     spmt::model::PermutationTableInput,
@@ -286,7 +287,7 @@ impl CudaOrchestrationCodegen {
                 .unwrap();
 
                 // Density inputs: output buffers from upstream shaders.
-                for input_dep in &dep.shader.inputs {
+                for input_dep in &dep.normal_shader_dependency_list() {
                     let input_sn = shader_dep_name(input_dep);
                     write!(self.code, ",\n                d_{input_sn}_output").unwrap();
                 }
