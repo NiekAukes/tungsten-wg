@@ -47,10 +47,19 @@ impl RustCodeGenerator {
             p.line("");
         }
 
+        // deduplicate constants by name
+        // they are guaranteed to have unique names
+        let mut seen_constants = std::collections::HashSet::new();
         // Generate constant definitions
         for constant in &icl.constants {
-            p.push("const ");
             let var_name = self.variable_to_string(&constant.var, &mut p);
+            if seen_constants.contains(&var_name) {
+                continue;
+            }
+            seen_constants.insert(var_name.clone());
+            print!("Generating constant: {}", var_name);
+
+            p.push("const ");
             p.push(&var_name);
             p.push(": ");
             p.push(&self.type_to_rust_string(&constant.var.t));
@@ -86,7 +95,6 @@ impl RustCodeGenerator {
         p.line("#[allow(unused_imports)]");
         p.line("#[allow(warnings)]");
         p.line("#[allow(clippy::all)]");
-        p.line("#[allow(unne)]");
 
         p.line("");
 
@@ -107,9 +115,15 @@ impl RustCodeGenerator {
         }
 
         // Generate constant definitions
+        let mut seen_constants = std::collections::HashSet::new();
         for constant in &icl.constants {
-            p.push("const ");
             let var_name = self.variable_to_string(&constant.var, &mut p);
+            if seen_constants.contains(&var_name) {
+                continue;
+            }
+            seen_constants.insert(var_name.clone());
+
+            p.push("const ");
             p.push(&var_name);
             p.push(": ");
             p.push(&self.type_to_rust_string(&constant.var.t));

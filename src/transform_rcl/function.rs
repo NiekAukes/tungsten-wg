@@ -103,11 +103,12 @@ pub fn convert_density_function<'a, 'm>(
     Vec<rcl::Constant<'m>>,
 ) {
     let mut rcl_funcs = Vec::new();
-    let density_func_name = spmt_df
-        .canonical_name
-        .as_deref()
-        .map(sanitize_name)
-        .unwrap_or_else(|| format!("density_function_{}", spmt_df.addr() as usize));
+    // let density_func_name = spmt_df
+    //     .canonical_name
+    //     .as_deref()
+    //     .map(sanitize_name)
+    //     .unwrap_or_else(|| format!("density_function_{}", spmt_df.addr() as usize));
+    let density_func_name = derive_density_function_name(spmt_df, dimensions);
     let mut rcl_func = rcl::Function::new(Some(density_func_name.clone()), None);
 
     // Add position parameters (x, y, z)
@@ -354,4 +355,13 @@ fn pos3_index<'m>(pos3_var: Rc<rcl::Variable>) -> rcl::Expression<'m> {
         return_type: rcl::Type::I32,
         arguments: vec![rcl::Expression::Variable(pos3_var)],
     }
+}
+
+fn derive_density_function_name(spmt_df: spmt::DensityFunctionRef<'_>, dimensions: (i32, i32, i32)) -> String {
+        let density_func_name = spmt_df
+        .canonical_name
+        .as_deref()
+        .map(sanitize_name)
+        .unwrap_or_else(|| format!("density_function_{}", spmt_df.addr() as usize));
+    format!("{}_d{}x{}x{}", density_func_name, dimensions.0, dimensions.1, dimensions.2)
 }

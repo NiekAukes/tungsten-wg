@@ -309,3 +309,7 @@ impl<'m> OrchestrationConverter<'m> {
         rcl_model
     }
 }
+
+fn derive_density_function_name(base_name: &str, dimensions: (i32, i32, i32)) -> String {
+    format!("{}_d{}x{}x{}", base_name, dimensions.0, dimensions.1, dimensions.2)
+}

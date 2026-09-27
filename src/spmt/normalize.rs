@@ -1,11 +1,11 @@
-use crate::{orchestrate::model::ShaderDependency, spmt::model::{Expression, Var}};
+use crate::{orchestrate::model::ShaderDependency, spmt::model::{Expression, MainDensityFunction, Var}};
 
 /// Normalization utilities for SPMT programs.
 /// These utilities help in normalizing SPMT programs, ensuring consistent formatting and structure.
 
 pub trait NormalizedSPMT<'m> {
     fn normal_density_list(&self) -> Vec<super::model::DensityFunctionRef<'m>>;
-    fn normal_main_density_list(&self) -> Vec<(super::model::DensityFunctionRef<'m>, (i32,i32,i32))>;
+    fn normal_main_density_list(&self) -> Vec<MainDensityFunction<'m>>;
 }
 
 pub trait NormalizedDensityFunction<'m> {
@@ -57,9 +57,9 @@ impl<'m> NormalizedSPMT<'m> for super::model::SPMT<'m> {
         list
     }
 
-    fn normal_main_density_list(&self) -> Vec<(super::model::DensityFunctionRef<'m>, (i32,i32,i32))> {
+    fn normal_main_density_list(&self) -> Vec<MainDensityFunction<'m>> {
         let mut list = self.main_density_functions.clone();
-        list.sort_by(|a, b| a.0.source_hash.cmp(&b.0.source_hash));
+        list.sort_by(|a, b| a.density_function.source_hash.cmp(&b.density_function.source_hash));
         list
     }
 }

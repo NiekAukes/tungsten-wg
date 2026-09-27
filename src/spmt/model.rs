@@ -12,10 +12,19 @@ use std::{
     rc::Rc,
 };
 
+#[derive(Debug, Clone)]
+pub struct MainDensityFunction<'m> {
+    pub density_function: DensityFunctionRef<'m>,
+    pub dimensions: (i32, i32, i32),
+    pub scaled_origin: (f64, f64, f64),
+    pub scaled_position: (f64, f64, f64),
+
+}
+
 pub struct SPMT<'m> {
     pub density_functions: Vec<DensityFunctionRef<'m>>,
     pub functions: Vec<FunctionRef<'m>>,
-    pub main_density_functions: Vec<(DensityFunctionRef<'m>, (i32, i32, i32))>,
+    pub main_density_functions: Vec<MainDensityFunction<'m>>,
 }
 
 pub type Var<'m> = Interned<'m, Variable>;

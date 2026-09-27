@@ -10,7 +10,7 @@ The transformation is organized into focused sub-modules:
 - types: Manages type conversions between SPMT and RCL
 */
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::orchestrate::Scale;
@@ -237,19 +237,22 @@ pub fn convert_spmt_to_inline_rcl<'a, 'm>(
 ) -> rcl::RCL<'m> {
     let mut rcl_model = rcl::RCL::new();
     let mut already_converted_functions = HashMap::new();
-    let mut functions_to_convert = Vec::new();
+    let mut functions_to_convert = HashSet::new();
 
     for wave in orchestration {
         for dependency in wave {
             for df in program
                 .density_functions
                 .iter()
-                .filter(|df| *df.canonical_name.as_ref().unwrap() == dependency.shader.name)
+                .filter(|df| (**df).addr() == dependency.shader.df_addr)
             {
-                functions_to_convert.push((dependency.dimensions, df));
+                // functions_to_convert.push((dependency.dimensions, df));
+                functions_to_convert.insert((dependency.dimensions, df));
             }
         }
     }
+
+    // 
 
     for (dimensions, spmt_df) in functions_to_convert {
         let c = add_density_to_rcl_model(

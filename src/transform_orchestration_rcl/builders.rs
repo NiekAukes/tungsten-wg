@@ -5,10 +5,7 @@ use crate::{
     orchestrate::{
         Flatten,
         model::{ShaderDependency, ShaderRef},
-    },
-    rcl::{Expression, Statement, Struct, Type, Variable},
-    spmt::model::PermutationTableInput,
-    transform_rcl::{
+    }, rcl::{Expression, Statement, Struct, Type, Variable}, spmt::model::PermutationTableInput, transform_orchestration_rcl::derive_density_function_name, transform_rcl::{
         BASE3D_NOISE_SAMPLER_STRUCT_NAME, PERLIN_NOISE_SAMPLER_STRUCT_NAME,
         PERM_TABLES_STRUCT_NAME, sanitize_name,
     },
@@ -144,7 +141,7 @@ pub fn make_output_buffer<'m>(
 ) -> (Rc<Variable>, Statement<'m>) {
     let dims = dimensions.flatten() as usize;
     let output_var = Rc::new(Variable {
-        name: Some(format!("{}_{}_output", shader_name, dims)),
+        name: Some(format!("{}_d{}x{}x{}_output", shader_name, dimensions.0, dimensions.1, dimensions.2)),
         t: Type::Struct(format!("Box<[f64; {}]>", dims)),
         mutable: true,
     });
@@ -361,8 +358,9 @@ pub fn make_shader_call<'m>(
         //wrong, but we don't actually need the exact types here
         call_arg_types.push(perm_table_type(&PermutationTableInput::Base3DNoise));
     }
+    let shader_call_name = derive_density_function_name(&shader_name, dep.dimensions);
     Expression::LateBoundCall {
-        function_name: shader_name,
+        function_name: shader_call_name,
         arguments: call_args,
         argument_types: call_arg_types,
         return_type,

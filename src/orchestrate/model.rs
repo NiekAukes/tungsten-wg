@@ -22,6 +22,8 @@ pub struct Shader<'a> {
     pub source: String,
     pub inputs: Vec<ShaderDependency<'a>>,
     pub permutation_tables: Vec<PermutationTableInput>,
+    // used to bind the shader to its corresponding density function
+    pub df_addr: *const (),
     pub source_hash: u64,
 }
 

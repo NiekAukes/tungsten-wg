@@ -18,13 +18,14 @@ pub fn transform_from_spmt<'a, 'm>(spmt: &SPMT<'a>, arena: &'m bumpalo::Bump) ->
     let orchestration = Orchestration::new(&arena);
 
     let mut transformer = Transformer::new(&arena, orchestration);
-    for (density_function, dims) in &spmt.main_density_functions {
-        let shader_ref = transformer.transform_density_function_to_shader(*density_function, *dims);
+    for main_density_function in &spmt.main_density_functions {
+        let density_function = main_density_function.density_function;
+        let shader_ref = transformer.transform_density_function_to_shader(density_function, main_density_function.dimensions);
         let shader_dependency = ShaderDependency {
             shader: shader_ref,
-            scaled_origin: Scale::new(1.0, 1.0, 1.0),
-            scaled_position: Scale::new(1.0, 1.0, 1.0),
-            dimensions: *dims,
+            scaled_origin: Scale::from(main_density_function.scaled_origin),
+            scaled_position: Scale::from(main_density_function.scaled_position),
+            dimensions: main_density_function.dimensions,
         };
         transformer
             .orchestration
@@ -87,6 +88,7 @@ impl<'m, 'a> Transformer<'a, 'm> {
             inputs: dependencies,
             permutation_tables: density_function.permutation_table_inputs.clone(),
             source_hash: density_function.source_hash,
+            df_addr: density_function.addr(),
         };
         let shader_ref = self.orchestration.add_shader(shader);
         self.cache.insert(density_function, shader_ref);
@@ -117,6 +119,7 @@ impl<'m> Orchestration<'m> {
             .iter()
             .cloned()
             .collect::<Vec<ShaderDependency<'m>>>();
+        
         while let Some(dep) = agenda.pop() {
             //dependencies.entry(dep.clone()).or_default();
             if dependencies.contains_key(&dep) {
