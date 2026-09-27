@@ -10,11 +10,12 @@ The transformation is organized into focused sub-modules:
 - function:   Converts SPMT functions to CUDA functions / kernels
 */
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::cuda::model as cuda;
 use crate::orchestrate::Scale;
+use crate::orchestrate::model::ShaderDependency;
 use crate::spmt::model::{self as spmt, Addr, DensityFunctionRef, DensityInput};
 
 pub mod expression;
@@ -186,7 +187,97 @@ pub fn add_density_to_cuda_module<'a, 'm>(
     cuda_module: &mut cuda::CudaModule<'m>,
     spmt_df: &'a spmt::DensityFunction<'a>,
     arena: &'m bumpalo::Bump,
+    dimensions: (i32, i32, i32),
     already_converted_functions: HashMap<*const (), cuda::FunctionRef<'m>>,
 ) -> CudaFunctionConverter<'m> {
-        function::convert_density_function(spmt_df, arena, already_converted_functions,cuda_module)
+        function::convert_density_function(spmt_df, arena, already_converted_functions, dimensions, cuda_module)
+}
+
+/*
+pub fn convert_spmt_to_inline_rcl<'a, 'm>(
+    program: &'a spmt::SPMT<'a>,
+    orchestration: &Vec<Vec<ShaderDependency>>,
+    arena: &'m bumpalo::Bump,
+) -> rcl::RCL<'m> {
+    let mut rcl_model = rcl::RCL::new();
+    let mut already_converted_functions = HashMap::new();
+    let mut functions_to_convert = HashSet::new();
+
+    for wave in orchestration {
+        for dependency in wave {
+            for df in program
+                .density_functions
+                .iter()
+                .filter(|df| (**df).addr() == dependency.shader.df_addr)
+            {
+                // functions_to_convert.push((dependency.dimensions, df));
+                functions_to_convert.insert((dependency.dimensions, df));
+            }
+        }
+    }
+
+    // 
+
+    for (dimensions, spmt_df) in functions_to_convert {
+        let c = add_density_to_rcl_model(
+            &mut rcl_model,
+            *spmt_df,
+            dimensions,
+            &arena,
+            already_converted_functions,
+        );
+        already_converted_functions = c.already_converted_functions;
+    }
+
+    rcl_model
+}
+ */
+
+ pub fn add_waves_to_cuda_module<'a, 'm>(
+    program: &'a spmt::SPMT<'a>,
+    orchestration: &Vec<Vec<ShaderDependency>>,
+    arena: &'m bumpalo::Bump,
+) -> cuda::CudaModule<'m> {
+    let mut cuda_module = cuda::CudaModule::new();
+    let mut already_converted_functions = HashMap::new();
+    let mut functions_to_convert = HashSet::new();
+
+    for wave in orchestration {
+        for dependency in wave {
+            for df in program
+                .density_functions
+                .iter()
+                .filter(|df| (**df).addr() == dependency.shader.df_addr)
+            {
+                // functions_to_convert.push((dependency.dimensions, df));
+                functions_to_convert.insert((dependency.dimensions, df));
+            }
+        }
+    }
+
+    // 
+
+    for (dimensions, spmt_df) in functions_to_convert {
+        // let c = add_density_to_rcl_model(
+        //     &mut rcl_model,
+        //     *spmt_df,
+        //     dimensions,
+        //     &arena,
+        //     already_converted_functions,
+        // );
+        let c = add_density_to_cuda_module(
+            &mut cuda_module,
+            spmt_df,
+            arena,
+            dimensions,
+            already_converted_functions,
+        );
+        already_converted_functions = c.already_converted_functions;
+    }
+
+    cuda_module
+}
+
+pub fn density_function_cuda_name(base_name: &str, dimensions: (i32,i32,i32)) -> String {
+    format!("{}_d{}x{}x{}", sanitize_name(base_name), dimensions.0, dimensions.1, dimensions.2)
 }

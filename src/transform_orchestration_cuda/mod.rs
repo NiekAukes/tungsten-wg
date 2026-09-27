@@ -11,21 +11,38 @@ use crate::{
 mod builders;
 pub mod random;
 
-/// Generates a complete CUDA C++ source file containing a `CudaPipeline_{name}`
-/// class for running density-function kernels on the GPU via CUDA.
-pub struct CudaOrchestrationCodegen {
-    /// Accumulated C++ source code.
-    code: String,
+/// Entry point data collected from a single call to `convert_single_entry`.
+#[derive(Clone)]
+struct EntryPoint<'a> {
+    name: String,
+    shaders: Vec<ShaderDependency<'a>>,
+    waves: Vec<Vec<ShaderDependency<'a>>>,
+    target_idx: usize,
 }
 
-impl CudaOrchestrationCodegen {
+/// Generates a complete CUDA C++ source file containing a single `CudaPipeline`
+/// class for running all density-function entry points on the GPU via CUDA.
+/// All permutation tables are loaded upfront, and each entry point has its own
+/// method (e.g. `run_final_density()`, `run_temperature()`, etc.).
+pub struct CudaOrchestrationCodegen<'a> {
+    /// Accumulated C++ source code.
+    code: String,
+    /// Collected entry points (name, shaders, waves, target index).
+    entry_points: Vec<EntryPoint<'a>>,
+    /// All unique permutation tables across all entry points.
+    all_perm_tables: Vec<PermutationTableInput>,
+}
+
+impl<'a> CudaOrchestrationCodegen<'a> {
     pub fn new() -> Self {
         Self {
-            code: String::with_capacity(16 * 1024),
+            code: String::with_capacity(32 * 1024),
+            entry_points: Vec::new(),
+            all_perm_tables: Vec::new(),
         }
     }
 
-    /// Generate a self-contained CUDA orchestrator for a single density entry.
+    /// Collect data for a single density entry point.
     ///
     /// * `name`   – human-readable density name (e.g. `"final_density"`).
     /// * `waves`  – shader dependencies grouped into topologically-sorted waves.
@@ -33,56 +50,68 @@ impl CudaOrchestrationCodegen {
     pub fn convert_single_entry(
         &mut self,
         name: &str,
-        waves: &[Vec<ShaderDependency<'_>>],
-        target: &ShaderDependency<'_>,
+        waves: Vec<Vec<ShaderDependency<'a>>>,
+        target: &ShaderDependency<'a>,
     ) {
-        let safe_name = sanitize_name(name);
-
         // Flatten all shaders in wave order for stable indexing.
-        let all_shaders: Vec<&ShaderDependency<'_>> = waves.iter().flat_map(|w| w.iter()).collect();
+        let all_shaders: Vec<ShaderDependency<'a>> = waves.iter().flat_map(|w| w.iter().cloned()).collect();
 
         // Map from ShaderDependency → index in `all_shaders`.
-        let shader_index: HashMap<&ShaderDependency<'_>, usize> = all_shaders
+        let shader_index: HashMap<&ShaderDependency<'a>, usize> = all_shaders
             .iter()
             .enumerate()
-            .map(|(i, s)| (*s, i))
+            .map(|(i, s)| (s, i))
             .collect();
 
         let target_idx = shader_index[target];
-        let (grid_x, grid_y, grid_z) = target.dimensions;
 
-        // Collect all unique perm tables across all shaders (deduplicated by param name).
-        let mut all_perm_tables: Vec<&PermutationTableInput> = Vec::new();
-        let mut seen_perm: HashSet<String> = HashSet::new();
-        for s in &all_shaders {
-            for pt in &s.shader.permutation_tables {
-                let pname = builders::perm_table_cuda_param_name(pt);
+        // Collect unique perm tables for this entry point and add to global set.
+        let mut seen_perm: HashSet<String> = self.all_perm_tables
+            .iter()
+            .map(|pt| builders::perm_table_cuda_param_name(pt))
+            .collect();
+
+        for s in all_shaders.clone() {
+            for pt in s.shader.permutation_tables.clone() {
+                let pname = builders::perm_table_cuda_param_name(&pt);
                 if seen_perm.insert(pname) {
-                    all_perm_tables.push(pt);
+                    self.all_perm_tables.push(pt);
                 }
             }
         }
-        all_perm_tables.sort();
 
-        self.emit_header(&safe_name, grid_x, grid_y, grid_z);
-        self.emit_class_open(&safe_name);
-        self.emit_private_fields(&all_shaders, &all_perm_tables);
-        self.emit_public_open();
-        self.emit_constructor(&safe_name, &all_shaders, &all_perm_tables);
-        self.emit_destructor(&safe_name, &all_shaders, &all_perm_tables);
-        self.emit_run(&safe_name, &all_shaders, waves, target_idx);
-        self.emit_class_close();
+        self.entry_points.push(EntryPoint {
+            name: name.to_string(),
+            shaders: all_shaders,
+            waves: waves.to_vec(),
+            target_idx,
+        });
     }
 
-    /// Return the generated C++ source.
-    pub fn finish(self) -> String {
+    /// Return the generated C++ source with a single unified CudaPipeline class.
+    pub fn finish(mut self) -> String {
+        if self.entry_points.is_empty() {
+            return self.code;
+        }
+
+        // Sort permutation tables for stable ordering
+        self.all_perm_tables.sort();
+
+        self.emit_header();
+        self.emit_class_open();
+        self.emit_private_fields();
+        self.emit_public_open();
+        self.emit_constructor();
+        self.emit_destructor();
+        self.emit_entry_point_methods();
+        self.emit_class_close();
+
         self.code
     }
 
     // ── private codegen helpers ──────────────────────────────────────────
 
-    fn emit_header(&mut self, name: &str, gx: i32, gy: i32, gz: i32) {
-        let total = gx as i64 * gy as i64 * gz as i64;
+    fn emit_header(&mut self) {
         writeln!(
             self.code,
             "// Auto-generated CUDA orchestrator — do not edit"
@@ -96,41 +125,24 @@ impl CudaOrchestrationCodegen {
         writeln!(self.code, "#include <vector>").unwrap();
         writeln!(self.code, "#include <cstdint>").unwrap();
         writeln!(self.code, "#include <cstdio>").unwrap();
-        writeln!(self.code).unwrap();
-        writeln!(self.code, "static const int GRID_X = {};", gx).unwrap();
-        writeln!(self.code, "static const int GRID_Y = {};", gy).unwrap();
-        writeln!(self.code, "static const int GRID_Z = {};", gz).unwrap();
-        writeln!(
-            self.code,
-            "static const int TOTAL_ELEMENTS = {}; // {} * {} * {}",
-            total, gx, gy, gz
-        )
-        .unwrap();
-        writeln!(
-            self.code,
-            "static const size_t BUFFER_SIZE = (size_t)TOTAL_ELEMENTS * sizeof(double);"
-        )
-        .unwrap();
+        writeln!(self.code, "#include <map>").unwrap();
         writeln!(self.code).unwrap();
     }
 
-    fn emit_class_open(&mut self, name: &str) {
+    fn emit_class_open(&mut self) {
         writeln!(
             self.code,
             "// ============================================================================"
         )
         .unwrap();
-        writeln!(self.code, "// CUDA PIPELINE: {}", name).unwrap();
+        writeln!(self.code, "// CUDA PIPELINE: Unified entry point orchestrator").unwrap();
         writeln!(
             self.code,
             "// ============================================================================"
         )
         .unwrap();
-        writeln!(self.code, "class CudaPipeline_{} {{", name).unwrap();
+        writeln!(self.code, "class CudaPipeline {{").unwrap();
         writeln!(self.code, "private:").unwrap();
-        writeln!(self.code, "    int3   grid_size;").unwrap();
-        writeln!(self.code, "    int    total_elements;").unwrap();
-        writeln!(self.code, "    size_t buffer_size;").unwrap();
         writeln!(
             self.code,
             "    cudaStream_t stream; // dedicated stream so instances run concurrently"
@@ -139,25 +151,33 @@ impl CudaOrchestrationCodegen {
         writeln!(self.code).unwrap();
     }
 
-    fn emit_private_fields(
-        &mut self,
-        shaders: &[&ShaderDependency<'_>],
-        perm_tables: &[&PermutationTableInput],
-    ) {
-        writeln!(self.code, "    // Output buffers (one per kernel)").unwrap();
-        for s in shaders {
-            let sn = shader_dep_name(s);
+    fn emit_private_fields(&mut self) {
+        // Collect all unique shaders across all entry points
+        let mut seen_shaders: HashSet<String> = HashSet::new();
+        let mut unique_shaders: Vec<(usize, String)> = Vec::new();
+
+        for ep in &self.entry_points {
+            for (idx, shader) in ep.shaders.iter().enumerate() {
+                let sn = shader_dep_name(shader);
+                if seen_shaders.insert(sn.clone()) {
+                    unique_shaders.push((idx, sn));
+                }
+            }
+        }
+
+        writeln!(self.code, "    // Output buffers (one per unique shader across all entry points)").unwrap();
+        for (_, sn) in &unique_shaders {
             writeln!(self.code, "    double* d_{}_output;", sn).unwrap();
         }
         writeln!(self.code).unwrap();
 
-        if !perm_tables.is_empty() {
+        if !self.all_perm_tables.is_empty() {
             writeln!(
                 self.code,
-                "    // Permutation tables (deduplicated across all kernels)"
+                "    // Permutation tables (loaded once for all entry points)"
             )
             .unwrap();
-            for pt in perm_tables {
+            for pt in &self.all_perm_tables {
                 let pn = builders::perm_table_cuda_param_name(pt);
                 writeln!(self.code, "    int8_t* d_{};", pn).unwrap();
             }
@@ -169,48 +189,42 @@ impl CudaOrchestrationCodegen {
         writeln!(self.code, "public:").unwrap();
     }
 
-    fn emit_constructor(
-        &mut self,
-        name: &str,
-        shaders: &[&ShaderDependency<'_>],
-        perm_tables: &[&PermutationTableInput],
-    ) {
-        writeln!(
-            self.code,
-            "    CudaPipeline_{}(int64_t world_seed) {{",
-            name
-        )
-        .unwrap();
-        writeln!(
-            self.code,
-            "        grid_size      = make_int3(GRID_X, GRID_Y, GRID_Z);"
-        )
-        .unwrap();
-        writeln!(self.code, "        total_elements = TOTAL_ELEMENTS;").unwrap();
-        writeln!(self.code, "        buffer_size    = BUFFER_SIZE;").unwrap();
+    fn emit_constructor(&mut self) {
+        writeln!(self.code, "    CudaPipeline(int64_t world_seed) {{").unwrap();
         writeln!(self.code, "        cudaStreamCreate(&stream);").unwrap();
         writeln!(self.code).unwrap();
 
-        writeln!(self.code, "        // Allocate output buffers").unwrap();
-        for s in shaders {
-            let sn = shader_dep_name(s);
-            writeln!(
-                self.code,
-                "        cudaMalloc(&d_{sn}_output, buffer_size);"
-            )
-            .unwrap();
+        // Collect all unique shaders
+        let mut seen_shaders: HashSet<String> = HashSet::new();
+        writeln!(self.code, "        // Allocate output buffers for all unique shaders").unwrap();
+        for ep in &self.entry_points {
+            for shader in &ep.shaders {
+                let sn = shader_dep_name(shader);
+                if seen_shaders.insert(sn.clone()) {
+                    let (dim_x, dim_y, dim_z) = shader.dimensions;
+                    let buffer_sz = dim_x as i64 * dim_y as i64 * dim_z as i64;
+                    writeln!(
+                        self.code,
+                        "        cudaMalloc(&d_{sn}_output, (size_t){} * sizeof(double));",
+                        buffer_sz
+                    )
+                    .unwrap();
+                }
+            }
         }
         writeln!(self.code).unwrap();
 
-        if !perm_tables.is_empty() {
+        if !self.all_perm_tables.is_empty() {
             writeln!(
                 self.code,
                 "        // Allocate and initialize permutation tables from world seed"
             )
             .unwrap();
+            // Collect perm tables into a separate vec to avoid borrow conflicts
+            let perm_tables: Vec<PermutationTableInput> = self.all_perm_tables.clone();
             for pt in perm_tables {
                 match pt {
-                    PermutationTableInput::PerlinNoise { .. } => self.emit_perm_table_perlin(pt),
+                    PermutationTableInput::PerlinNoise { .. } => self.emit_perm_table_perlin(&pt),
                     PermutationTableInput::Base3DNoise => self.emit_perm_table_base3d(),
                 }
             }
@@ -221,43 +235,56 @@ impl CudaOrchestrationCodegen {
         writeln!(self.code).unwrap();
     }
 
-    fn emit_destructor(
-        &mut self,
-        name: &str,
-        shaders: &[&ShaderDependency<'_>],
-        perm_tables: &[&PermutationTableInput],
-    ) {
-        writeln!(self.code, "    ~CudaPipeline_{}() {{", name).unwrap();
-        for s in shaders {
-            let sn = shader_dep_name(s);
-            writeln!(self.code, "        cudaFree(d_{sn}_output);").unwrap();
+    fn emit_destructor(&mut self) {
+        writeln!(self.code, "    ~CudaPipeline() {{").unwrap();
+
+        // Collect all unique shaders
+        let mut seen_shaders: HashSet<String> = HashSet::new();
+        for ep in &self.entry_points {
+            for shader in &ep.shaders {
+                let sn = shader_dep_name(shader);
+                if seen_shaders.insert(sn.clone()) {
+                    writeln!(self.code, "        cudaFree(d_{sn}_output);").unwrap();
+                }
+            }
         }
-        for pt in perm_tables {
+
+        for pt in &self.all_perm_tables {
             let pn = builders::perm_table_cuda_param_name(pt);
             writeln!(self.code, "        cudaFree(d_{pn});").unwrap();
         }
+
         writeln!(self.code, "        cudaStreamDestroy(stream);").unwrap();
         writeln!(self.code, "    }}").unwrap();
         writeln!(self.code).unwrap();
     }
 
-    fn emit_run(
-        &mut self,
-        _name: &str,
-        shaders: &[&ShaderDependency<'_>],
-        waves: &[Vec<ShaderDependency<'_>>],
-        target_idx: usize,
-    ) {
+    fn emit_entry_point_methods(&mut self) {
+        // Collect entry points into a separate vec to avoid borrow conflicts
+        let entry_points: Vec<EntryPoint<'a>> = self.entry_points.clone();
+        for ep in entry_points {
+            self.emit_single_run_method(&ep);
+        }
+    }
+
+    fn emit_single_run_method(&mut self, ep: &EntryPoint<'_>) {
+        let safe_name = sanitize_name(&ep.name);
         writeln!(
             self.code,
-            "    /// Execute the full density pipeline and return the target output."
+            "    /// Execute the {} pipeline and return the target output.",
+            ep.name
         )
         .unwrap();
-        writeln!(self.code, "    std::vector<double> run(double3 origin) {{").unwrap();
+        writeln!(
+            self.code,
+            "    std::vector<double> run_{}(double3 origin) {{",
+            safe_name
+        )
+        .unwrap();
         writeln!(self.code, "        const int BLOCK_SIZE = 256;").unwrap();
         writeln!(self.code).unwrap();
 
-        for (wave_idx, wave) in waves.iter().enumerate() {
+        for (wave_idx, wave) in ep.waves.iter().enumerate() {
             let wave_names: Vec<String> =
                 wave.iter().map(|s| sanitize_name(&s.shader.name)).collect();
             writeln!(
@@ -269,7 +296,8 @@ impl CudaOrchestrationCodegen {
             .unwrap();
 
             for dep in wave {
-                let kernel_name = sanitize_name(&dep.shader.name);
+                // let kernel_name = sanitize_name(&dep.shader.name);
+                let kernel_name = builders::density_function_cuda_name(&dep);
                 let dep_name = shader_dep_name(dep);
                 let (dim_x, dim_y, dim_z) = dep.dimensions;
                 let total_elements_for_shader = dim_x as i64 * dim_y as i64 * dim_z as i64;
@@ -319,8 +347,9 @@ impl CudaOrchestrationCodegen {
         }
 
         // Copy target output back to host.
-        let target_sn = shader_dep_name(shaders[target_idx]);
-        let (target_dim_x, target_dim_y, target_dim_z) = shaders[target_idx].dimensions;
+        let target_shader = &ep.shaders[ep.target_idx];
+        let target_sn = shader_dep_name(target_shader);
+        let (target_dim_x, target_dim_y, target_dim_z) = target_shader.dimensions;
         let target_total_elements = target_dim_x as i64 * target_dim_y as i64 * target_dim_z as i64;
         writeln!(self.code, "        // Copy target output to host").unwrap();
         writeln!(

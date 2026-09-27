@@ -220,17 +220,23 @@ pub fn compile(program: &Program, config: &CompilerConfig) -> Result<CompiledOut
         let cuda_arena = Bump::new();
 
         // 3a. CUDA Density Function Module
-        let mut cuda_module = CudaModule::new();
+        // let mut cuda_module = CudaModule::new();
+        let mut cuda_module = transform_cuda::add_waves_to_cuda_module(
+            program,
+            &waves,
+            &cuda_arena,
+        );
+
         cuda_module.add_include("\"helpers.cu\"".to_string());
 
-        for density_function in &program.normal_density_list() {
-            transform_cuda::add_density_to_cuda_module(
-                &mut cuda_module,
-                density_function,
-                &cuda_arena,
-                HashMap::new(),
-            );
-        }
+        // for density_function in &program.normal_density_list() {
+        //     transform_cuda::add_density_to_cuda_module(
+        //         &mut cuda_module,
+        //         density_function,
+        //         &cuda_arena,
+        //         HashMap::new(),
+        //     );
+        // }
         let cuda_generator = CudaCodeGenerator::new();
         output.cuda_density_function = Some(cuda_generator.generate_module(&cuda_module));
 
@@ -241,7 +247,7 @@ pub fn compile(program: &Program, config: &CompilerConfig) -> Result<CompiledOut
             let pruned_waves = orchestration.arrange_waves_for(primary);
             cuda_orchestration_codegen.convert_single_entry(
                 &primary.shader.name,
-                pruned_waves.as_ref(),
+                pruned_waves,
                 primary,
             );
         }

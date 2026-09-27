@@ -30,6 +30,7 @@ pub fn convert_function<'a, 'm>(
         CudaFunctionConverter::new_with_density_inputs(arena, density_inputs.clone());
     converter.already_converted_functions = already_converted_functions;
 
+    
     let mut cuda_func = cuda::CudaFunction::new(
         cuda::FunctionQualifier::Device,
         spmt_func.canonical_name.as_deref().map(sanitize_name),
@@ -93,6 +94,7 @@ pub fn convert_density_function<'a, 'm>(
     spmt_df: &'a spmt::DensityFunction<'a>,
     arena: &'m bumpalo::Bump,
     already_converted_functions: HashMap<*const (), cuda::FunctionRef<'m>>,
+    dimensions: (i32, i32, i32),
     cuda_module: &mut cuda::CudaModule<'m>,
 ) -> CudaFunctionConverter<'m> {
     let mut device_funcs: Vec<cuda::FunctionRef<'m>> = Vec::new();
@@ -138,7 +140,9 @@ pub fn convert_density_function<'a, 'm>(
     }
 
     // ── Build the __global__ kernel ──────────────────────────────────────
-    let kernel_name = spmt_df.canonical_name.as_deref().map(sanitize_name);
+    let kernel_name = spmt_df.canonical_name.as_deref().map(|name|
+        super::density_function_cuda_name(&sanitize_name(name), dimensions)
+    );
 
     let mut kernel = cuda::CudaFunction::new(
         cuda::FunctionQualifier::Global,
