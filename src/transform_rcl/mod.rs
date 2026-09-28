@@ -241,6 +241,7 @@ pub fn convert_spmt_to_inline_rcl<'a, 'm>(
 
     for wave in orchestration {
         for dependency in wave {
+            let mut found = false;
             for df in program
                 .density_functions
                 .iter()
@@ -248,6 +249,23 @@ pub fn convert_spmt_to_inline_rcl<'a, 'm>(
             {
                 // functions_to_convert.push((dependency.dimensions, df));
                 functions_to_convert.insert((dependency.dimensions, df));
+                found = true;
+            }
+            if !found {
+                for df in program
+                .density_functions
+                .iter()
+                {
+                    println!("{}", df.canonical_name.as_ref().unwrap());
+                }
+                for df in program
+                .main_density_functions
+                .iter()
+                {
+                    println!("main {}", df.density_function.canonical_name.as_ref().unwrap());
+                }
+            
+                panic!("Density function not found for shader dependency: {:?}", dependency.shader.name );
             }
         }
     }

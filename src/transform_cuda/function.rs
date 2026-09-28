@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use super::{CudaFunctionConverter, InputKey, sanitize_name};
 use crate::cuda::model as cuda;
-use crate::spmt::model::{self as spmt, Addr, Interned};
+use crate::spmt::model::{self as spmt, Addr, Interned, PermutationTableInput};
 use crate::spmt::normalize::{NormalizedDensityFunction, NormalizedFunction};
 use crate::transform_cuda::types::{convert_type, permutation_table_param_name};
 
@@ -189,15 +189,48 @@ pub fn convert_density_function<'a, 'm>(
         kernel.add_parameter(param.name.clone(), param.t.clone(), param.is_const);
     }
 
+    if spmt_df.permutation_table_inputs.len() > 0 {
+    // IMPORTANT: Ensure that the permutation table is in shared memory for efficient access.
+        kernel.add_statement(cuda::Statement::ExprStatement(cuda::Expression::LateBoundCall {
+            function_name: "SMEM_TABLES_BEGIN".to_string(),
+            arguments: vec![cuda::Expression::I32Literal(spmt_df.permutation_table_inputs.len() as i32)],
+        }));
+    }        
+    
+
     // Permutation table pointers: `const int8_t* perm_table_X`
-    for perm in &spmt_df.permutation_table_inputs {
+    for (i,perm) in spmt_df.permutation_table_inputs.iter().enumerate() {
         let name = permutation_table_param_name(perm);
+        let global_name = format!("g_{}", name);
+        let t = cuda::Type::ConstPointer(Box::new(cuda::Type::Int8));
         kernel.add_parameter(
-            name,
-            cuda::Type::ConstPointer(Box::new(cuda::Type::Int8)),
+            global_name,
+            t.clone(),
             true,
         );
+        let var = Rc::new(cuda::Variable {
+            name: spmt::Name::Named(name.clone()),
+            t,
+            qualifiers: vec![],
+        });
+        match perm {
+            PermutationTableInput::PerlinNoise { .. } => kernel.add_statement(cuda::Statement::ExprStatement(
+                cuda::Expression::LateBoundCall {
+            function_name: "SMEM_STAGE".to_string(),
+            arguments: vec![
+                cuda::Expression::Variable(var),
+                cuda::Expression::I32Literal(i as i32)
+                ],
+            })),
+            PermutationTableInput::Base3DNoise => kernel.add_statement(cuda::Statement::ExprStatement(
+                cuda::Expression::LateBoundCall {
+                    function_name: "SMEM_INTERPOLATED_SAMPLER".to_string(),
+                    arguments: vec![cuda::Expression::Variable(var),],
+            }))
+        }
     }
+    
+        
 
     // Output pointer: `double* output`
     kernel.add_parameter(
