@@ -98,6 +98,7 @@ impl<'a> CudaOrchestrationCodegen<'a> {
         self.all_perm_tables.sort();
 
         self.emit_header();
+        self.emit_buffer_sizes();
         self.emit_class_open();
         self.emit_private_fields();
         self.emit_public_open();
@@ -127,6 +128,32 @@ impl<'a> CudaOrchestrationCodegen<'a> {
         writeln!(self.code, "#include <cstdio>").unwrap();
         writeln!(self.code, "#include <map>").unwrap();
         writeln!(self.code).unwrap();
+    }
+
+    fn emit_buffer_sizes(&mut self) {
+        writeln!(self.code, "    // Buffer sizes for each unique shader output").unwrap();
+        /*
+        let target_shader = &ep.shaders[ep.target_idx];
+        let target_sn = shader_dep_name(target_shader);
+        let (target_dim_x, target_dim_y, target_dim_z) = target_shader.dimensions;
+        let target_total_elements = target_dim_x as i64 * target_dim_y as i64 * target_dim_z as i64;
+        writeln!(self.code, "        // Copy target output to host").unwrap();
+        writeln!(
+            self.code,
+            "        std::vector<double> result({target_total_elements});"
+        )
+        .unwrap();
+         */
+        for ep in self.entry_points.iter() {
+            let target_shader = &ep.shaders[ep.target_idx];
+            let target_sn = target_shader.shader.name.clone();
+            let (target_dim_x, target_dim_y, target_dim_z) = target_shader.dimensions;
+            let target_total_elements = target_dim_x as i64 * target_dim_y as i64 * target_dim_z as i64;
+            writeln!(self.code, "const int {target_sn}_total_elements = {target_total_elements};").unwrap();
+            writeln!(self.code, "const int {target_sn}_dim_x = {target_dim_x};").unwrap();
+            writeln!(self.code, "const int {target_sn}_dim_y = {target_dim_y};").unwrap();
+            writeln!(self.code, "const int {target_sn}_dim_z = {target_dim_z};").unwrap();
+        }
     }
 
     fn emit_class_open(&mut self) {
@@ -277,7 +304,7 @@ impl<'a> CudaOrchestrationCodegen<'a> {
         .unwrap();
         writeln!(
             self.code,
-            "    std::vector<double> run_{}(double3 origin) {{",
+            "    void run_{}(double3 origin, double* output) {{",
             safe_name
         )
         .unwrap();
@@ -342,7 +369,7 @@ impl<'a> CudaOrchestrationCodegen<'a> {
                 writeln!(self.code, "        }}").unwrap();
             }
 
-            writeln!(self.code, "        cudaStreamSynchronize(stream);").unwrap();
+            // writeln!(self.code, "        cudaStreamSynchronize(stream);").unwrap();
             writeln!(self.code).unwrap();
         }
 
@@ -354,16 +381,10 @@ impl<'a> CudaOrchestrationCodegen<'a> {
         writeln!(self.code, "        // Copy target output to host").unwrap();
         writeln!(
             self.code,
-            "        std::vector<double> result({target_total_elements});"
+            "        cudaMemcpyAsync(output, d_{target_sn}_output, (size_t){target_total_elements} * sizeof(double), cudaMemcpyDeviceToHost, stream);"
         )
         .unwrap();
-        writeln!(
-            self.code,
-            "        cudaMemcpyAsync(result.data(), d_{target_sn}_output, (size_t){target_total_elements} * sizeof(double), cudaMemcpyDeviceToHost, stream);"
-        )
-        .unwrap();
-        writeln!(self.code, "        cudaStreamSynchronize(stream);").unwrap();
-        writeln!(self.code, "        return result;").unwrap();
+        // writeln!(self.code, "        cudaStreamSynchronize(stream);").unwrap();
         writeln!(self.code, "    }}").unwrap();
         writeln!(self.code).unwrap();
     }

@@ -194,42 +194,45 @@ pub fn convert_density_function<'a, 'm>(
         kernel.add_statement(cuda::Statement::ExprStatement(cuda::Expression::LateBoundCall {
             function_name: "SMEM_TABLES_BEGIN".to_string(),
             arguments: vec![cuda::Expression::I32Literal(spmt_df.permutation_table_inputs.len() as i32)],
-        }));
-    }        
+        }));   
     
 
-    // Permutation table pointers: `const int8_t* perm_table_X`
-    for (i,perm) in spmt_df.permutation_table_inputs.iter().enumerate() {
-        let name = permutation_table_param_name(perm);
-        let global_name = format!("g_{}", name);
-        let t = cuda::Type::ConstPointer(Box::new(cuda::Type::Int8));
-        kernel.add_parameter(
-            global_name,
-            t.clone(),
-            true,
-        );
-        let var = Rc::new(cuda::Variable {
-            name: spmt::Name::Named(name.clone()),
-            t,
-            qualifiers: vec![],
-        });
-        match perm {
-            PermutationTableInput::PerlinNoise { .. } => kernel.add_statement(cuda::Statement::ExprStatement(
-                cuda::Expression::LateBoundCall {
-            function_name: "SMEM_STAGE".to_string(),
-            arguments: vec![
-                cuda::Expression::Variable(var),
-                cuda::Expression::I32Literal(i as i32)
-                ],
-            })),
-            PermutationTableInput::Base3DNoise => kernel.add_statement(cuda::Statement::ExprStatement(
-                cuda::Expression::LateBoundCall {
-                    function_name: "SMEM_INTERPOLATED_SAMPLER".to_string(),
-                    arguments: vec![cuda::Expression::Variable(var),],
-            }))
+        // Permutation table pointers: `const int8_t* perm_table_X`
+        for (i,perm) in spmt_df.permutation_table_inputs.iter().enumerate() {
+            let name = permutation_table_param_name(perm);
+            let global_name = format!("g_{}", name);
+            let t = cuda::Type::ConstPointer(Box::new(cuda::Type::Int8));
+            kernel.add_parameter(
+                global_name,
+                t.clone(),
+                true,
+            );
+            let var = Rc::new(cuda::Variable {
+                name: spmt::Name::Named(name.clone()),
+                t,
+                qualifiers: vec![],
+            });
+            match perm {
+                PermutationTableInput::PerlinNoise { .. } => kernel.add_statement(cuda::Statement::ExprStatement(
+                    cuda::Expression::LateBoundCall {
+                function_name: "SMEM_STAGE".to_string(),
+                arguments: vec![
+                    cuda::Expression::Variable(var),
+                    cuda::Expression::I32Literal(i as i32)
+                    ],
+                })),
+                PermutationTableInput::Base3DNoise => kernel.add_statement(cuda::Statement::ExprStatement(
+                    cuda::Expression::LateBoundCall {
+                        function_name: "SMEM_INTERPOLATED_SAMPLER".to_string(),
+                        arguments: vec![cuda::Expression::Variable(var),],
+                }))
+            }
         }
-    }
+
+        // sync threads
+        kernel.add_statement(cuda::Statement::InlineCuda("__syncthreads();".to_string()));
     
+    }     
         
 
     // Output pointer: `double* output`
