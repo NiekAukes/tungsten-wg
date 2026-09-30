@@ -2,6 +2,9 @@ pub mod dag;
 pub mod model;
 pub mod pretty;
 pub mod normalize;
+pub mod builder;
+
+pub use model::*;
 
 pub fn try_derive_type<'a>(expr: &model::Expression<'a>) -> Option<model::VariableType> {
     match expr {
