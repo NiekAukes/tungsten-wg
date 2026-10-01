@@ -18,7 +18,6 @@ pub struct MainDensityFunction<'m> {
     pub dimensions: (i32, i32, i32),
     pub scaled_origin: (f64, f64, f64),
     pub scaled_position: (f64, f64, f64),
-
 }
 
 pub struct SPMT<'m> {
@@ -43,7 +42,7 @@ pub struct DensityFunction<'m> {
     pub constants: Vec<(Var<'m>, Expression<'m>)>,
 
     /// An identifier for the source of this density function, used to detect changes and cache results.
-    pub source_hash: u64, 
+    pub source_hash: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -81,9 +80,21 @@ impl Ord for PermutationTableInput {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         use PermutationTableInput::*;
         match (self, other) {
-            (PerlinNoise { ident: i1, subident: s1, subident_index: idx1 }, PerlinNoise { ident: i2, subident: s2, subident_index: idx2 }) => {
-                i1.cmp(i2).then_with(|| s1.cmp(s2)).then_with(|| idx1.cmp(idx2))
-            }
+            (
+                PerlinNoise {
+                    ident: i1,
+                    subident: s1,
+                    subident_index: idx1,
+                },
+                PerlinNoise {
+                    ident: i2,
+                    subident: s2,
+                    subident_index: idx2,
+                },
+            ) => i1
+                .cmp(i2)
+                .then_with(|| s1.cmp(s2))
+                .then_with(|| idx1.cmp(idx2)),
             (PerlinNoise { .. }, Base3DNoise) => std::cmp::Ordering::Less,
             (Base3DNoise, PerlinNoise { .. }) => std::cmp::Ordering::Greater,
             (Base3DNoise, Base3DNoise) => std::cmp::Ordering::Equal,
@@ -211,6 +222,7 @@ pub enum Expression<'m> {
         function_name: String,
         parameters: Vec<Expression<'m>>,
         parameter_types: Vec<VariableType>,
+        return_type: VariableType,
     },
     /// A 'call' to another density function, with the given parameters.
     /// This is used to call other density functions from within a density function.

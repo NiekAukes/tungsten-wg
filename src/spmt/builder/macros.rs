@@ -1,6 +1,8 @@
 use crate::spmt::builder::Builder;
+pub use crate::spmt::builder::SPMTBuilder;
 use crate::spmt::model::*;
 
+#[macro_export]
 macro_rules! impl_binop {
     ($($trait:ident :: $method:ident => $op:ident),* $(,)?) => {$(
         impl<'m, R: Into<Expression<'m>>> std::ops::$trait<R> for Expression<'m> {
@@ -31,14 +33,20 @@ impl_binop!(Add::add => Add, Sub::sub => Subtract, Mul::mul => Multiply, Div::di
 impl<'m> std::ops::Neg for Expression<'m> {
     type Output = Expression<'m>;
     fn neg(self) -> Self::Output {
-        Expression::UnaryOp { op: UnaryOperator::Negate, operand: Box::new(self) }
+        Expression::UnaryOp {
+            op: UnaryOperator::Negate,
+            operand: Box::new(self),
+        }
     }
 }
 
 impl<'m> std::ops::Neg for Var<'m> {
     type Output = Expression<'m>;
     fn neg(self) -> Self::Output {
-        Expression::UnaryOp { op: UnaryOperator::Negate, operand: Box::new(self.into()) }
+        Expression::UnaryOp {
+            op: UnaryOperator::Negate,
+            operand: Box::new(self.into()),
+        }
     }
 }
 
@@ -58,7 +66,9 @@ macro_rules! impl_from_lit {
 impl_from_lit!(f32 => Float, f64 => Double, i32 => Int, i64 => Long);
 
 impl<'m> From<Var<'m>> for Expression<'m> {
-    fn from(v: Var<'m>) -> Self { Expression::Variable(v) }
+    fn from(v: Var<'m>) -> Self {
+        Expression::Variable(v)
+    }
 }
 
 macro_rules! impl_cmp {
@@ -87,75 +97,140 @@ macro_rules! impl_cmp {
 impl_cmp!(lt => Less, le => LessEqual, gt => Greater, ge => GreaterEqual,
           eq_ => Equal, ne => NotEqual, and => And, or => Or);
 
+#[macro_export]
+macro_rules! vt {
+    // [T; N]  -> Array(Box<T>, N)   (nests: [[F32; 3]; 3])
+    ([$t:tt; $n:expr]) => {
+        $crate::spmt::VariableType::Array(Box::new($crate::vt!($t)), $n)
+    };
+    // "Name"  -> Extern("Name")
+    ($s:literal) => { $crate::spmt::VariableType::Extern($s) };
+    // (T)     -> T   (parenthesize anything the other rules can't take as one token)
+    (($($inner:tt)*)) => { $crate::vt!($($inner)*) };
+    // F32, I32, Pos3, Bool, DensityInput, ...
+    ($id:ident) => { $crate::spmt::VariableType::$id };
+}
 
+#[macro_export]
 macro_rules! extern_fns {
-    ($($name:ident($($arg:ident),*) : $ty:ident),* $(,)?) => {$(
-        pub fn $name<'m>($($arg: impl Into<Expression<'m>>),*) -> Expression<'m> {
-            Expression::ExternCall {
-                parameter_types: vec![$( { let _ = &$arg; VariableType::$ty } ),*],
+    ($($name:ident($($arg:ident : $aty:tt),* $(,)?) : $ret:tt),* $(,)?) => {$(
+        pub fn $name<'m>($($arg: impl Into<$crate::spmt::Expression<'m>>),*) -> $crate::spmt::Expression<'m> {
+            $crate::spmt::Expression::ExternCall {
                 function_name: stringify!($name).to_string(),
                 parameters: vec![$($arg.into()),*],
+                parameter_types: vec![$($crate::vt!($aty)),*],
+                return_type: $crate::vt!($ret),
             }
         }
     )*};
 }
-
 extern_fns! {
-    sin(x): F32, cos(x): F32, sqrt(x): F32, floor(x): F32,
-    pow(a, b): F32, min(a, b): F32, max(a, b): F32, clamp(x, lo, hi): F32,
+    sin(x: F64): F64, cos(x: F64): F64, sqrt(x: F64): F64, floor(x: F64): F64,
+    pow(a: F64, b: F64): F64, min(a: F64, b: F64): F64, max(a: F64, b: F64): F64, clamp(x: F64, lo: F64, hi: F64): F64,
 }
 
+#[macro_export]
 macro_rules! vars {
     ($b:expr; $($name:ident : $t:ident),* $(,)?) => {
         $( let $name = $b.local(stringify!($name), VariableType::$t); )*
     };
 }
 
-macro_rules! body {
-    (@acc $v:ident;) => {};
-    (@acc $v:ident; return $e:expr; $($rest:tt)*) => {
-        $v.push(Statement::Return(($e).into()));
-        body!(@acc $v; $($rest)*);
-    };
-    (@acc $v:ident; break; $($rest:tt)*) => {
-        $v.push(Statement::Break);
-        body!(@acc $v; $($rest)*);
-    };
-    (@acc $v:ident; repeat ($n:expr) { $($b:tt)* } $($rest:tt)*) => {
-        $v.push(Statement::Repeat { count: $n, body: body!($($b)*) });
-        body!(@acc $v; $($rest)*);
-    };
-    (@acc $v:ident; while ($c:expr) { $($b:tt)* } $($rest:tt)*) => {
-        $v.push(Statement::While { condition: ($c).into(), body: body!($($b)*) });
-        body!(@acc $v; $($rest)*);
-    };
-    (@acc $v:ident; if ($c:expr) { $($t:tt)* } else { $($e:tt)* } $($rest:tt)*) => {
-        $v.push(Statement::If {
-            condition: ($c).into(),
-            then_branch: body!($($t)*),
-            else_branch: body!($($e)*),
-        });
-        body!(@acc $v; $($rest)*);
-    };
-    (@acc $v:ident; if ($c:expr) { $($t:tt)* } $($rest:tt)*) => {
-        $v.push(Statement::If {
-            condition: ($c).into(),
-            then_branch: body!($($t)*),
-            else_branch: Vec::new(),
-        });
-        body!(@acc $v; $($rest)*);
-    };
-    (@acc $v:ident; $t:ident = $e:expr; $($rest:tt)*) => {
-        $v.push(Statement::Assign { target: $t, value: ($e).into() });
-        body!(@acc $v; $($rest)*);
-    };
-    ($($t:tt)*) => {{
-        let mut v = Vec::new();
-        body!(@acc v; $($t)*);
-        v
+#[macro_export]
+macro_rules! build {
+    // entry point: body!(builder, { ... })
+    ($b:expr, { $($t:tt)* }) => {{
+        let mut __v: Vec<Statement> = Vec::new();
+        $crate::body!(@acc $b, __v; $($t)*);
+        for stmt in __v {
+            ($b).add_statement(stmt);
+        }
     }};
 }
 
+#[macro_export]
+macro_rules! body {
+    ($b:expr, { $($t:tt)* }) => {{
+        let mut __v: Vec<Statement> = Vec::new();
+        $crate::body!(@acc $b, __v; $($t)*);
+        __v
+    }};
+
+    (@acc $b:expr, $v:ident;) => {};
+
+    (@acc $b:expr, $v:ident; return $e:expr; $($rest:tt)*) => {
+        $v.push(Statement::Return(($e).into()));
+        $crate::body!(@acc $b, $v; $($rest)*);
+    };
+    (@acc $b:expr, $v:ident; break; $($rest:tt)*) => {
+        $v.push(Statement::Break);
+        $crate::body!(@acc $b, $v; $($rest)*);
+    };
+
+    // let x: T = e;   (declares the variable on the builder, binds `x` in Rust scope)
+    (@acc $b:expr, $v:ident; let $n:ident : $ty:ident = $e:expr; $($rest:tt)*) => {
+        let $n = $b.local(stringify!($n), VariableType::$ty);
+        $v.push(Statement::Assign { target: $n, value: ($e).into() });
+        $crate::body!(@acc $b, $v; $($rest)*);
+    };
+
+    (@acc $b:expr, $v:ident; let $n:ident = $e:expr; $($rest:tt)*) => {
+        let $n = $e;
+        $crate::body!(@acc $b, $v; $($rest)*);
+    };
+
+    (@acc $b:expr, $v:ident; while ($c:expr) { $($body:tt)* } $($rest:tt)*) => {
+        $v.push(Statement::While {
+            condition: ($c).into(),
+            body: $crate::body!($b, { $($body)* }),
+        });
+        $crate::body!(@acc $b, $v; $($rest)*);
+    };
+    (@acc $b:expr, $v:ident; repeat ($c:expr) { $($body:tt)* } $($rest:tt)*) => {
+        $v.push(Statement::Repeat {
+            count: ($c),
+            body: $crate::body!($b, { $($body)* }),
+        });
+        $crate::body!(@acc $b, $v; $($rest)*);
+    };
+    // (@acc $b:expr, repeat ($n:expr) { $($a:tt)* } $($rest:tt)*) => {
+    //     $v.push(Statement::Repeat { count: $n, body: body!($($a)*) });
+    //     body!(@acc $v; $($rest)*);
+    // };
+    (@acc $b:expr, $v:ident; if ($c:expr) { $($t:tt)* } else { $($e:tt)* } $($rest:tt)*) => {
+        $v.push(Statement::If {
+            condition: ($c).into(),
+            then_branch: $crate::body!($b, { $($t)* }),
+            else_branch: $crate::body!($b, { $($e)* }),
+        });
+        $crate::body!(@acc $b, $v; $($rest)*);
+    };
+    (@acc $b:expr, $v:ident; if ($c:expr) { $($t:tt)* } $($rest:tt)*) => {
+        $v.push(Statement::If {
+            condition: ($c).into(),
+            then_branch: $crate::body!($b, { $($t)* }),
+            else_branch: Vec::new(),
+        });
+        $crate::body!(@acc $b, $v; $($rest)*);
+    };
+
+    // x -= e; x += e; ...
+    (@acc $b:expr, $v:ident; $t:ident -= $e:expr; $($rest:tt)*) => {
+        $v.push(Statement::Assign { target: $t, value: Expression::from($t) - ($e) });
+        $crate::body!(@acc $b, $v; $($rest)*);
+    };
+    (@acc $b:expr, $v:ident; $t:ident += $e:expr; $($rest:tt)*) => {
+        $v.push(Statement::Assign { target: $t, value: Expression::from($t) + ($e) });
+        $crate::body!(@acc $b, $v; $($rest)*);
+    };
+
+    (@acc $b:expr, $v:ident; $t:ident = $e:expr; $($rest:tt)*) => {
+        $v.push(Statement::Assign { target: $t, value: ($e).into() });
+        $crate::body!(@acc $b, $v; $($rest)*);
+    };
+}
+
+#[macro_export]
 macro_rules! vec3 {
     ($x:expr, $y:expr, $z:expr) => {
         Expression::Construct {
@@ -165,6 +240,7 @@ macro_rules! vec3 {
     };
 }
 
+#[macro_export]
 macro_rules! pos3 {
     ($x:expr, $y:expr, $z:expr) => {
         Expression::Construct {
@@ -174,6 +250,7 @@ macro_rules! pos3 {
     };
 }
 
+#[macro_export]
 macro_rules! array {
     ($($e:expr),* $(,)?) => { Expression::ArrayLiteral(vec![$(($e).into()),*]) };
 }
@@ -182,16 +259,17 @@ fn test() {
     let arena = bumpalo::Bump::new();
     let mut b = Builder::new(&arena);
     vars!(b; x: F32, y: F32, acc: F32);
+    let x = 0.0f32;
 
-    let body = body! {
+    build!(b, {
         acc = 0.0f32;
         repeat (4) {
             acc = acc + sin(x * 2.0f32) * y;
         }
-        if (acc.gt(1.0f32)) {
+        if (acc.gt(x)) {
             return 1.0f32;
         } else {
             return -acc;
         }
-    };
+    });
 }

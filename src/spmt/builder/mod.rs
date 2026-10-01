@@ -1,17 +1,20 @@
 use bumpalo::Bump;
 
-use crate::spmt::{builder::{collector::Collector, hash::Fingerprint}, model::*};
+use crate::spmt::{
+    builder::{collector::Collector, hash::Fingerprint},
+    model::*,
+};
 use std::{
     cell::RefCell,
-    collections::{hash_map::DefaultHasher, HashSet},
+    collections::{HashSet, hash_map::DefaultHasher},
     hash::{Hash, Hasher},
 };
 
 type E<'m> = Expression<'m>;
 type S<'m> = Statement<'m>;
 
-mod hash;
 mod collector;
+mod hash;
 pub mod macros;
 pub use macros::*;
 
@@ -22,6 +25,28 @@ struct State<'m> {
     /// Every density input created via `density()`, used to dedupe. Only the ones
     /// actually referenced by the body end up in the output.
     density_cache: Vec<DensityInput<'m>>,
+}
+
+pub trait SPMTBuilder<'m> {
+    fn named(self, name: impl Into<String>) -> Self;
+    fn with_source_hash(self, hash: u64) -> Self;
+    fn returns(self, t: VariableType) -> Self;
+    fn set_body(&mut self, body: Vec<Statement<'m>>);
+    fn add_statement(&mut self, stmt: Statement<'m>);
+    fn extend_statements(&mut self, stmts: Vec<Statement<'m>>);
+    fn param(&mut self, name: &str, t: VariableType) -> Var<'m>;
+    fn alloc_var(&self, name: Name, t: VariableType) -> Var<'m>;
+    fn named_var(&self, name: &str, t: VariableType) -> Var<'m>;
+    fn temp(&self, prefix: &str, t: VariableType) -> Var<'m>;
+    fn local(&self, name: &str, t: VariableType) -> Var<'m>;
+    fn constant(&self, name: &str, t: VariableType, value: impl Into<Expression<'m>>) -> Var<'m>;
+    fn density(
+        &self,
+        func: DensityFunctionRef<'m>,
+        scaled_origin: (f64, f64, f64),
+        scaled_position: (f64, f64, f64),
+        dimensions: (i32, i32, i32),
+    ) -> DensityInput<'m>;
 }
 
 pub struct Builder<'m> {
@@ -57,28 +82,37 @@ impl<'m> Builder<'m> {
             state: RefCell::new(State::default()),
         }
     }
+}
 
+impl<'m> SPMTBuilder<'m> for Builder<'m> {
     // ---- configuration -------------------------------------------------
-
-    pub fn named(mut self, name: impl Into<String>) -> Self {
+    fn named(mut self, name: impl Into<String>) -> Self {
         self.canonical_name = Some(name.into());
         self
     }
 
     /// Provide a hash of the *source* (e.g. of the input JSON) instead of
     /// deriving one from the IR structure.
-    pub fn with_source_hash(mut self, hash: u64) -> Self {
+    fn with_source_hash(mut self, hash: u64) -> Self {
         self.source_hash = Some(hash);
         self
     }
 
-    pub fn returns(mut self, t: VariableType) -> Self {
+    fn returns(mut self, t: VariableType) -> Self {
         self.return_type = t;
         self
     }
 
-    pub fn set_body(&mut self, body: Vec<Statement<'m>>) {
+    fn set_body(&mut self, body: Vec<Statement<'m>>) {
         self.body = body;
+    }
+
+    fn add_statement(&mut self, stmt: Statement<'m>) {
+        self.body.push(stmt);
+    }
+
+    fn extend_statements(&mut self, stmts: Vec<Statement<'m>>) {
+        self.body.extend(stmts);
     }
 
     // ---- variables -----------------------------------------------------
@@ -87,7 +121,8 @@ impl<'m> Builder<'m> {
         Interned::new(self.arena.alloc(Variable { name, t }))
     }
 
-    fn named_var(&self, st: &State<'m>, name: &str, t: VariableType) -> Var<'m> {
+    fn named_var(&self, name: &str, t: VariableType) -> Var<'m> {
+        let st = self.state.borrow();
         let taken = self
             .params
             .iter()
@@ -99,39 +134,31 @@ impl<'m> Builder<'m> {
     }
 
     /// Function parameter (only meaningful for `build_function`).
-    pub fn param(&mut self, name: &str, t: VariableType) -> Var<'m> {
-        let v = {
-            let st = self.state.borrow();
-            self.named_var(&st, name, t)
-        };
+    fn param(&mut self, name: &str, t: VariableType) -> Var<'m> {
+        let v = { self.named_var(name, t) };
         self.params.push(v);
         v
     }
 
     /// Uniquely named local. This is what `spmt_body!`'s `let` expands to.
-    pub fn local(&self, name: &str, t: VariableType) -> Var<'m> {
+    fn local(&self, name: &str, t: VariableType) -> Var<'m> {
         let mut st = self.state.borrow_mut();
-        let v = self.named_var(&st, name, t);
+        let v = self.named_var(name, t);
         st.locals.push(v);
         v
     }
 
     /// Compiler temporary. The name is only a hint, so no uniqueness check.
-    pub fn temp(&self, prefix: &str, t: VariableType) -> Var<'m> {
+    fn temp(&self, prefix: &str, t: VariableType) -> Var<'m> {
         let v = self.alloc_var(Name::Prefixed(prefix.to_owned()), t);
         self.state.borrow_mut().locals.push(v);
         v
     }
 
     /// A named constant, hoisted out of the body.
-    pub fn constant(
-        &self,
-        name: &str,
-        t: VariableType,
-        value: impl Into<Expression<'m>>,
-    ) -> Var<'m> {
+    fn constant(&self, name: &str, t: VariableType, value: impl Into<Expression<'m>>) -> Var<'m> {
         let mut st = self.state.borrow_mut();
-        let v = self.named_var(&st, name, t);
+        let v = self.named_var(name, t);
         st.constants.push((v, value.into()));
         v
     }
@@ -140,7 +167,7 @@ impl<'m> Builder<'m> {
 
     /// Declare a dependency on another density function. Identical requests
     /// return the same input (and therefore the same variable).
-    pub fn density(
+    fn density(
         &self,
         func: DensityFunctionRef<'m>,
         scaled_origin: (f64, f64, f64),
@@ -161,13 +188,21 @@ impl<'m> Builder<'m> {
             Name::Named(format!("in_density_{n}")),
             VariableType::DensityInput,
         );
-        let input = DensityInput { var, density_function: func, scaled_origin, scaled_position, dimensions };
+        let input = DensityInput {
+            var,
+            density_function: func,
+            scaled_origin,
+            scaled_position,
+            dimensions,
+        };
         st.density_cache.push(input.clone());
         input
     }
 
     // ---- finishing -----------------------------------------------------
+}
 
+impl<'m> Builder<'m> {
     pub fn build_function(self) -> Function<'m> {
         Function {
             canonical_name: self.canonical_name,
@@ -185,7 +220,9 @@ impl<'m> Builder<'m> {
     }
 
     pub fn build_compute_unit(self) -> DensityFunction<'m> {
-        let State { locals, constants, .. } = self.state.into_inner();
+        let State {
+            locals, constants, ..
+        } = self.state.into_inner();
 
         // Walk constants first, then the body, so the order is stable.
         let mut c = Collector::default();
@@ -193,7 +230,12 @@ impl<'m> Builder<'m> {
             c.expr(value);
         }
         c.stmts(&self.body);
-        let Collector { helpers, density_inputs, mut perm_tables, .. } = c;
+        let Collector {
+            helpers,
+            density_inputs,
+            mut perm_tables,
+            ..
+        } = c;
 
         // Deterministic order for the permutation tables (that's what `Ord` is for).
         perm_tables.sort();
@@ -234,4 +276,3 @@ impl<'m> Builder<'m> {
         Interned::new(arena.alloc(self.build_compute_unit()))
     }
 }
-

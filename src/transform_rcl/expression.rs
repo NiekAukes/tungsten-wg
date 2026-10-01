@@ -101,6 +101,7 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
                 function_name,
                 parameters,
                 parameter_types,
+                return_type: _,
             } => {
                 // not a real extern call, it is simply a function call to a function that is not defined in the SPMT,
                 // so we treat it as a "late bound" function call with the given name and parameters

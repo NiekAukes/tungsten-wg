@@ -1,8 +1,8 @@
+pub mod builder;
 pub mod dag;
 pub mod model;
-pub mod pretty;
 pub mod normalize;
-pub mod builder;
+pub mod pretty;
 
 pub use model::*;
 
@@ -21,7 +21,7 @@ pub fn try_derive_type<'a>(expr: &model::Expression<'a>) -> Option<model::Variab
         model::Expression::UnaryOp { operand, .. } => try_derive_type(operand),
         model::Expression::Field { type_of_field, .. } => Some(type_of_field.clone()),
         model::Expression::FunctionCall { function, .. } => Some(function.return_type.clone()),
-        model::Expression::ExternCall { .. } => None, // Could be derived from extern declaration if needed
+        model::Expression::ExternCall { return_type, .. } => Some(return_type.clone()),
         model::Expression::DensityVariable(_, _) => Some(model::VariableType::DensityInput),
         model::Expression::PermutationTable(_) => Some(model::VariableType::PermutationTable),
         model::Expression::Construct { t, .. } => Some(t.clone()),

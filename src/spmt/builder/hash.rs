@@ -1,5 +1,5 @@
-use std::hash::{DefaultHasher, Hash, Hasher};
 use crate::spmt::model::*;
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 type E<'m> = Expression<'m>;
 type S<'m> = Statement<'m>;
@@ -67,7 +67,11 @@ impl Fingerprint {
                 self.tag(1);
                 self.expr(e);
             }
-            S::If { condition, then_branch, else_branch } => {
+            S::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
                 self.tag(2);
                 self.expr(condition);
                 self.stmts(then_branch);
@@ -116,15 +120,24 @@ impl Fingerprint {
                 self.tag(4);
                 self.0.write_i64(*x);
             }
-            E::FunctionCall { function, parameters } => {
+            E::FunctionCall {
+                function,
+                parameters,
+            } => {
                 self.tag(5);
                 self.function(function); // by content, not by pointer
                 self.exprs(parameters);
             }
-            E::ExternCall { function_name, parameters, parameter_types } => {
+            E::ExternCall {
+                function_name,
+                parameters,
+                parameter_types,
+                return_type,
+            } => {
                 self.tag(6);
                 function_name.hash(&mut self.0);
                 format!("{:?}", parameter_types).hash(&mut self.0);
+                format!("{:?}", return_type).hash(&mut self.0);
                 self.exprs(parameters);
             }
             E::DensityVariable(input, index) => {
@@ -153,7 +166,12 @@ impl Fingerprint {
                 self.tag(*op as u8);
                 self.expr(operand);
             }
-            E::Field { base, field, type_of_field, known_idnex } => {
+            E::Field {
+                base,
+                field,
+                type_of_field,
+                known_idnex,
+            } => {
                 self.tag(11);
                 self.expr(base);
                 field.hash(&mut self.0);
@@ -186,4 +204,3 @@ impl Fingerprint {
         }
     }
 }
-

@@ -325,6 +325,7 @@ impl<'m> PrettyPrint for Expression<'m> {
                 function_name,
                 parameters,
                 parameter_types: _,
+                return_type: _,
             } => {
                 p.push("extern ");
                 p.push(function_name);

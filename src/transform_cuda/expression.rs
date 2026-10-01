@@ -86,6 +86,7 @@ impl<'a, 'm> CudaFunctionConverter<'m> {
                 function_name,
                 parameters,
                 parameter_types,
+                return_type: _,
             } => {
                 // ExternCalls map to CUDA device math intrinsics / other helpers.
                 // The C99 / CUDA math function names are intentionally the same
