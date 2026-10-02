@@ -13,6 +13,7 @@ pub fn try_derive_type<'a>(expr: &model::Expression<'a>) -> Option<model::Variab
         model::Expression::Double(_) => Some(model::VariableType::F64),
         model::Expression::Int(_) => Some(model::VariableType::I32),
         model::Expression::Long(_) => Some(model::VariableType::I64),
+        model::Expression::Bool(_) => Some(model::VariableType::Bool),
         model::Expression::BinaryOp { op, left, right } => {
             let left_type = try_derive_type(left);
             let right_type = try_derive_type(right);
@@ -26,7 +27,7 @@ pub fn try_derive_type<'a>(expr: &model::Expression<'a>) -> Option<model::Variab
         model::Expression::PermutationTable(_) => Some(model::VariableType::PermutationTable),
         model::Expression::Construct { t, .. } => Some(t.clone()),
         model::Expression::ArrayAccess { array, index } => {
-            let array_type = try_derive_type(array)?;
+            let array_type: VariableType = try_derive_type(array)?;
             match array_type {
                 model::VariableType::Vec3 => Some(model::VariableType::F64),
                 model::VariableType::Pos3 => Some(model::VariableType::F64),
@@ -36,6 +37,7 @@ pub fn try_derive_type<'a>(expr: &model::Expression<'a>) -> Option<model::Variab
         }
         model::Expression::ConstructExtern { t, args } => Some(t.clone()), // Assume the type is determined by the construct extern declaration
         model::Expression::ArrayLiteral(expressions) => None,
+        model::Expression::ExplicitCast { to, expr } => Some(to.clone()),
     }
 }
 

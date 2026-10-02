@@ -32,7 +32,11 @@ impl<'m> Collector<'m> {
         match s {
             S::Assign { value, .. } => self.expr(value),
             S::Return(e) => self.expr(e),
-            S::If { condition, then_branch, else_branch } => {
+            S::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
                 self.expr(condition);
                 self.stmts(then_branch);
                 self.stmts(else_branch);
@@ -48,8 +52,11 @@ impl<'m> Collector<'m> {
 
     pub fn expr(&mut self, e: &Expression<'m>) {
         match e {
-            E::Variable(_) | E::Float(_) | E::Double(_) | E::Int(_) | E::Long(_) => {}
-            E::FunctionCall { function, parameters } => {
+            E::Variable(_) | E::Float(_) | E::Double(_) | E::Int(_) | E::Long(_) | E::Bool(_) => {}
+            E::FunctionCall {
+                function,
+                parameters,
+            } => {
                 self.function(*function);
                 for p in parameters {
                     self.expr(p);
@@ -97,6 +104,9 @@ impl<'m> Collector<'m> {
                 for i in items {
                     self.expr(i);
                 }
+            }
+            E::ExplicitCast { to, expr } => {
+                self.expr(expr);
             }
         }
     }

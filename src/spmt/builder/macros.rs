@@ -50,6 +50,75 @@ impl<'m> std::ops::Neg for Var<'m> {
     }
 }
 
+impl<'m> std::ops::Not for Expression<'m> {
+    type Output = Expression<'m>;
+    fn not(self) -> Self::Output {
+        Expression::UnaryOp {
+            op: UnaryOperator::Not,
+            operand: Box::new(self),
+        }
+    }
+}
+
+impl<'m> std::ops::Not for Var<'m> {
+    type Output = Expression<'m>;
+    fn not(self) -> Self::Output {
+        Expression::UnaryOp {
+            op: UnaryOperator::Not,
+            operand: Box::new(self.into()),
+        }
+    }
+}
+
+impl<'m> Expression<'m> {
+    pub fn index(self, index: impl Into<Expression<'m>>) -> Expression<'m> {
+        Expression::ArrayAccess {
+            array: Box::new(self),
+            index: Box::new(index.into()),
+        }
+    }
+
+    pub fn field(self, field: impl Into<String>, type_of_field: VariableType) -> Expression<'m> {
+        Expression::Field {
+            base: Box::new(self.into()),
+            field: field.into(),
+            type_of_field,
+            known_idnex: None,
+        }
+    }
+
+    pub fn cast(self, to_type: VariableType) -> Expression<'m> {
+        Expression::ExplicitCast {
+            to: to_type,
+            expr: Box::new(self.into()),
+        }
+    }
+}
+
+impl<'m> Var<'m> {
+    pub fn index(self, index: impl Into<Expression<'m>>) -> Expression<'m> {
+        Expression::ArrayAccess {
+            array: Box::new(self.into()),
+            index: Box::new(index.into()),
+        }
+    }
+
+    pub fn field(self, field: impl Into<String>, type_of_field: VariableType) -> Expression<'m> {
+        Expression::Field {
+            base: Box::new(self.into()),
+            field: field.into(),
+            type_of_field,
+            known_idnex: None,
+        }
+    }
+    pub fn cast(self, to_type: VariableType) -> Expression<'m> {
+        Expression::ExplicitCast {
+            to: to_type,
+            expr: Box::new(self.into()),
+        }
+    }
+}
+
 // impl<'m> From<Var<'m>> for Expression<'m> {
 //     fn from(v: Var<'m>) -> Self {
 //         Expression::Variable(v)
@@ -63,7 +132,7 @@ macro_rules! impl_from_lit {
         }
     )*};
 }
-impl_from_lit!(f32 => Float, f64 => Double, i32 => Int, i64 => Long);
+impl_from_lit!(f32 => Float, f64 => Double, i32 => Int, i64 => Long, bool => Bool);
 
 impl<'m> From<Var<'m>> for Expression<'m> {
     fn from(v: Var<'m>) -> Self {
@@ -95,7 +164,7 @@ macro_rules! impl_cmp {
     };
 }
 impl_cmp!(lt => Less, le => LessEqual, gt => Greater, ge => GreaterEqual,
-          eq_ => Equal, ne => NotEqual, and => And, or => Or);
+          eq_expr => Equal, ne => NotEqual, and => And, or => Or);
 
 #[macro_export]
 macro_rules! vt {

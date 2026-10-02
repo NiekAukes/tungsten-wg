@@ -28,6 +28,7 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
             spmt::Expression::Double(val) => rcl::Expression::F64Literal(*val),
             spmt::Expression::Int(val) => rcl::Expression::I32Literal(*val),
             spmt::Expression::Long(val) => rcl::Expression::I64Literal(*val),
+            spmt::Expression::Bool(val) => rcl::Expression::BoolLiteral(*val),
             spmt::Expression::BinaryOp { op, left, right } => {
                 // let left = Box::new(self.convert_expression(left));
                 // let right = Box::new(self.convert_expression(right));
@@ -252,6 +253,14 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
                     panic!("Array literal conversion error: length mismatch");
                 }
                 rcl::Expression::ArrayLiteral(converted_elements)
+            }
+            spmt::Expression::ExplicitCast { to, expr } => {
+                let converted_expr = self.convert_expression(expr);
+                let target_type = convert_type(&to);
+                rcl::Expression::Cast {
+                    to_type: target_type,
+                    expr: Box::new(converted_expr),
+                }
             }
         }
     }

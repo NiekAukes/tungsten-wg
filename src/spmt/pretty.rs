@@ -300,6 +300,9 @@ impl<'m> PrettyPrint for Expression<'m> {
             Expression::Long(v) => {
                 write!(p.line, "{}", v).unwrap();
             }
+            Expression::Bool(v) => {
+                write!(p.line, "{}", v).unwrap();
+            }
             Expression::FunctionCall {
                 function,
                 parameters,
@@ -385,6 +388,7 @@ impl<'m> PrettyPrint for Expression<'m> {
             Expression::UnaryOp { op, operand } => {
                 p.push(match op {
                     UnaryOperator::Negate => "-",
+                    UnaryOperator::Not => "!",
                 });
                 operand.pretty(p);
             }
@@ -435,6 +439,10 @@ impl<'m> PrettyPrint for Expression<'m> {
                     expr.pretty(p);
                 }
                 p.push("]");
+            }
+            Expression::ExplicitCast { to, expr } => {
+                p.push(&format!("({:?})", to));
+                expr.pretty(p);
             }
         }
     }

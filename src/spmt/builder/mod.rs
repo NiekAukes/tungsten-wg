@@ -266,6 +266,7 @@ impl<'m> Builder<'m> {
             body: self.body,
             variables: locals,
             helper_functions: helpers,
+            host_inputs: Vec::new(),
             constants,
             source_hash,
         }
@@ -274,5 +275,11 @@ impl<'m> Builder<'m> {
     pub fn finish_compute_unit(self) -> DensityFunctionRef<'m> {
         let arena = self.arena;
         Interned::new(arena.alloc(self.build_compute_unit()))
+    }
+}
+
+impl<'m> Expression<'m> {
+    pub fn reusable(self) -> impl Fn() -> Expression<'m> {
+        move || self.clone()
     }
 }

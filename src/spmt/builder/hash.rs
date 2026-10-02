@@ -201,6 +201,15 @@ impl Fingerprint {
                 self.tag(15);
                 self.exprs(items);
             }
+            E::Bool(v) => {
+                self.tag(16);
+                v.hash(&mut self.0);
+            }
+            E::ExplicitCast { to, expr } => {
+                self.tag(17);
+                format!("{:?}", to).hash(&mut self.0);
+                self.expr(expr);
+            }
         }
     }
 }

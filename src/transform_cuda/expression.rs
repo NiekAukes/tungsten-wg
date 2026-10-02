@@ -21,6 +21,7 @@ impl<'a, 'm> CudaFunctionConverter<'m> {
             spmt::Expression::Double(val) => cuda::Expression::F64Literal(*val),
             spmt::Expression::Int(val) => cuda::Expression::I32Literal(*val),
             spmt::Expression::Long(val) => cuda::Expression::I64Literal(*val),
+            spmt::Expression::Bool(val) => cuda::Expression::BoolLiteral(*val),
 
             spmt::Expression::BinaryOp { op, left, right } => {
                 let left = Box::new(self.convert_expression(left));
@@ -177,6 +178,14 @@ impl<'a, 'm> CudaFunctionConverter<'m> {
             spmt::Expression::ArrayLiteral(exprs) => {
                 let converted = exprs.iter().map(|e| self.convert_expression(e)).collect();
                 cuda::Expression::ArrayLiteral(converted)
+            }
+            spmt::Expression::ExplicitCast { to, expr } => {
+                let converted_expr = self.convert_expression(expr);
+                let target_type = convert_type(&to);
+                cuda::Expression::Cast {
+                    to_type: target_type,
+                    expr: Box::new(converted_expr),
+                }
             }
         }
     }

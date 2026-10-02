@@ -36,6 +36,7 @@ pub struct DensityFunction<'m> {
     pub canonical_name: Option<String>,
     pub density_inputs: Vec<DensityInput<'m>>,
     pub permutation_table_inputs: Vec<PermutationTableInput>,
+    pub host_inputs: Vec<HostInput<'m>>,
     pub body: Vec<Statement<'m>>,
     pub variables: Vec<Var<'m>>,
     pub helper_functions: Vec<FunctionRef<'m>>,
@@ -74,6 +75,19 @@ pub enum PermutationTableInput {
         subident_index: usize,
     },
     Base3DNoise,
+}
+
+/// Input from the host environment, either statically computed, or dynamically computed at runtime.
+#[derive(PartialEq, Debug, Clone)]
+pub enum HostInput<'m> {
+    /// A statically computed input from the host environment.
+    /// Asked when starting the orchestration.
+    Static(Var<'m>),
+    /// A dynamically computed input from the host environment.
+    /// Asked during the orchestration as needed. This can pose performance benefits
+    /// as it computes while the GPU is busy.
+    /// Currently unsupported
+    Dynamic(Var<'m>),
 }
 
 impl Ord for PermutationTableInput {
@@ -211,6 +225,7 @@ pub enum Expression<'m> {
     Double(f64),
     Int(i32),
     Long(i64),
+    Bool(bool),
     /// A Function call: function(parameters...)
     FunctionCall {
         function: FunctionRef<'m>,
@@ -272,6 +287,10 @@ pub enum Expression<'m> {
     },
 
     ArrayLiteral(Vec<Expression<'m>>),
+    ExplicitCast {
+        to: VariableType,
+        expr: Box<Expression<'m>>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -293,6 +312,7 @@ pub enum BinaryOperator {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum UnaryOperator {
     Negate,
+    Not,
 }
 
 pub struct Interned<'m, T: ?Sized>(&'m T);

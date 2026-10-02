@@ -55,6 +55,7 @@ pub fn convert_binary_op(op: spmt::BinaryOperator) -> cuda::BinaryOperator {
 pub fn convert_unary_op(op: spmt::UnaryOperator) -> cuda::UnaryOperator {
     match op {
         spmt::UnaryOperator::Negate => cuda::UnaryOperator::Negate,
+        spmt::UnaryOperator::Not => cuda::UnaryOperator::Not,
     }
 }
 

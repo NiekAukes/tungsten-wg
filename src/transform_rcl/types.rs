@@ -53,6 +53,7 @@ pub fn convert_binary_op(op: spmt::BinaryOperator) -> rcl::BinaryOperator {
 pub fn convert_unary_op(op: spmt::UnaryOperator) -> rcl::UnaryOperator {
     match op {
         spmt::UnaryOperator::Negate => rcl::UnaryOperator::Negate,
+        spmt::UnaryOperator::Not => rcl::UnaryOperator::Not,
     }
 }
 
