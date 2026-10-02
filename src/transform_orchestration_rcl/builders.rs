@@ -6,12 +6,12 @@ use crate::{
         Flatten,
         model::{ShaderDependency, ShaderRef},
     }, rcl::{Expression, Statement, Struct, Type, Variable}, spmt::model::PermutationTableInput, transform_orchestration_rcl::derive_density_function_name, transform_rcl::{
-        BASE3D_NOISE_SAMPLER_STRUCT_NAME, PERLIN_NOISE_SAMPLER_STRUCT_NAME,
-        PERM_TABLES_STRUCT_NAME, sanitize_name,
+        BASE3D_NOISE_SAMPLER_STRUCT_NAME, PERLIN_NOISE_SAMPLER_STRUCT_NAME, PERM_TABLES_STRUCT_NAME, sanitize_name, types::convert_type,
     },
 };
 
 pub const PERM_TABLES_PARAM_NAME: &str = "perm_tables";
+pub const HOST_CONSTS_PARAM_NAME: &str = "host_consts";
 
 /// RCL type used for a single boxed permutation table (`Box<[i8; 256]>`).
 pub fn perm_table_type(pt: &PermutationTableInput) -> Type {
@@ -208,6 +208,7 @@ pub fn make_shader_loop<'m>(
     dep_exprs: Vec<Expression<'m>>,
     dep_types: Vec<Type>,
     perm_exprs: Vec<Expression<'m>>,
+    host_consts: Rc<Variable>,
     wave_i: usize,
     shader_j: usize,
 ) -> Statement<'m> {
@@ -277,6 +278,7 @@ pub fn make_shader_loop<'m>(
         dep_exprs,
         dep_types,
         perm_exprs,
+        host_consts,
         wave_i,
         shader_j,
     );
@@ -303,6 +305,7 @@ pub fn make_shader_call<'m>(
     dep_exprs: Vec<Expression<'m>>,
     dep_types: Vec<Type>,
     perm_exprs: Vec<Expression<'m>>,
+    host_consts: Rc<Variable>,
     wave_i: usize,
     shader_j: usize,
 ) -> Expression<'m> {
@@ -358,6 +361,9 @@ pub fn make_shader_call<'m>(
         //wrong, but we don't actually need the exact types here
         call_arg_types.push(perm_table_type(&PermutationTableInput::Base3DNoise));
     }
+    call_args.push(Expression::Variable(host_consts.clone()));
+    call_arg_types.push(Type::Struct("HostConsts".to_string()));
+    
     let shader_call_name = derive_density_function_name(&shader_name, dep.dimensions);
     Expression::LateBoundCall {
         function_name: shader_call_name,
@@ -375,6 +381,7 @@ pub fn make_new_shader_call<'m>(
     dep_exprs: Vec<Expression<'m>>,
     dep_types: Vec<Type>,
     perm_exprs: Vec<Expression<'m>>,
+    host_consts: Rc<Variable>,
     wave_i: usize,
     shader_j: usize,
 ) -> Expression<'m> {
@@ -424,9 +431,13 @@ pub fn make_new_shader_call<'m>(
     ];
     call_arg_types.extend(dep_types);
     for _ in &perm_exprs {
-        //wrong, but we don't actually need the exact types here
+        //subtly wrong, but we don't actually need the exact types here
         call_arg_types.push(perm_table_type(&PermutationTableInput::Base3DNoise));
     }
+
+    call_args.push(Expression::Variable(host_consts.clone()));
+    call_arg_types.push(Type::Struct("HostConsts".to_string()));
+
     Expression::LateBoundCall {
         function_name: shader_name,
         arguments: call_args,

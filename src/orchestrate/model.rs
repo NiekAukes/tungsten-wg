@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    orchestrate::Scale,
-    spmt::model::{Interned, PermutationTableInput},
+    orchestrate::Scale, spmt::{HostInput, VariableType, model::{Interned, PermutationTableInput}},
 };
 
 // pub type ShaderRef = Interned<Shader>;
@@ -21,6 +20,7 @@ pub struct Shader<'a> {
     pub name: String,
     pub source: String,
     pub inputs: Vec<ShaderDependency<'a>>,
+    pub host_inputs: Vec<(String, VariableType)>,
     pub permutation_tables: Vec<PermutationTableInput>,
     // used to bind the shader to its corresponding density function
     pub df_addr: *const (),

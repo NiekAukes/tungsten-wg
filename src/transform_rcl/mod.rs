@@ -26,6 +26,7 @@ pub mod types;
 pub const PERM_TABLES_STRUCT_NAME: &str = "PermutationTables";
 pub const PERLIN_NOISE_SAMPLER_STRUCT_NAME: &str = "PerlinNoiseSampler";
 pub const BASE3D_NOISE_SAMPLER_STRUCT_NAME: &str = "InterpolatedNoiseSampler";
+pub const HOST_CONSTS_STRUCT_NAME: &str = "HostConsts";
 /// Converter state for transforming SPMT to RCL
 pub struct RCLFunctionConverter<'m> {
     /// Maps SPMT variable addresses to RCL variables
@@ -40,6 +41,8 @@ pub struct RCLFunctionConverter<'m> {
     /// Counter for generating unique anonymous variable names.
     anon_counter: usize,
     density_func_name: String,
+    /// Maps SPMT host input variables to their field name in the `HostConsts` struct.
+    pub host_fields: Rc<HashMap<InputKey, String>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -95,6 +98,7 @@ impl<'m> RCLFunctionConverter<'m> {
             name_cache: HashMap::new(),
             anon_counter: 0,
             density_func_name: name,
+            host_fields: Rc::new(HashMap::new()),
         }
     }
 
@@ -122,6 +126,7 @@ impl<'m> RCLFunctionConverter<'m> {
             name_cache: HashMap::new(),
             anon_counter: 0,
             density_func_name: name,
+            host_fields: Rc::new(HashMap::new()),
         }
     }
 
@@ -220,9 +225,15 @@ pub fn add_density_to_rcl_model<'a, 'm>(
     dimensions: (i32, i32, i32),
     arena: &'m bumpalo::Bump,
     already_converted_functions: HashMap<*const (), rcl::FunctionRef<'m>>,
+    host_fields: Rc<HashMap<InputKey, String>>,
 ) -> RCLFunctionConverter<'m> {
-    let (rcl_funcs, rcl_density, converter, constants) =
-        function::convert_density_function(spmt_df, arena, dimensions, already_converted_functions);
+    let (rcl_funcs, rcl_density, converter, constants) = function::convert_density_function(
+        spmt_df,
+        arena,
+        dimensions,
+        already_converted_functions,
+        host_fields,
+    );
     rcl_model.functions.extend(rcl_funcs.into_iter());
     rcl_model.constants.extend(constants.into_iter());
 
@@ -252,7 +263,31 @@ pub fn convert_spmt_to_inline_rcl<'a, 'm>(
         }
     }
 
-    // 
+    // One HostConsts struct covers every host input in the whole program.
+    let mut host_struct = rcl::Struct::new(HOST_CONSTS_STRUCT_NAME.to_string());
+    let mut host_fields = HashMap::new();
+    for df in program.density_functions.iter() {
+        for hi in &df.host_inputs {
+            let name = hi.get_name();
+            let t = types::convert_type(&hi.get_type());
+            match host_struct.fields.iter().find(|(n, _)| *n == name) {
+                Some((_, existing)) => assert_eq!(
+                    *existing, t,
+                    "Host input '{}' declared with conflicting types",
+                    name
+                ),
+                None => host_struct.add_field(name.clone(), t),
+            }
+            let key = match hi {
+                spmt::HostInput::Static(v) | spmt::HostInput::Dynamic(v) => InputKey::from(*v),
+            };
+            host_fields.insert(key, name);
+        }
+    }
+    rcl_model
+        .structs
+        .push(spmt::Interned::new(arena.alloc(host_struct)));
+    let host_fields = Rc::new(host_fields);
 
     for (dimensions, spmt_df) in functions_to_convert {
         let c = add_density_to_rcl_model(
@@ -261,6 +296,7 @@ pub fn convert_spmt_to_inline_rcl<'a, 'm>(
             dimensions,
             &arena,
             already_converted_functions,
+            host_fields.clone(),
         );
         already_converted_functions = c.already_converted_functions;
     }

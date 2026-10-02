@@ -14,12 +14,27 @@ use crate::spmt::try_derive_type;
 use crate::transform_rcl::types::{convert_type, permutation_table_var_name};
 use crate::transform_rcl::{InputKey, function};
 
+/// The `&HostConsts` parameter every generated function receives.
+pub fn host_consts_variable() -> Rc<rcl::Variable> {
+    Rc::new(rcl::Variable {
+        name: Some("host_consts".to_string()),
+        t: rcl::Type::Struct(format!("&{}", crate::transform_rcl::HOST_CONSTS_STRUCT_NAME)),
+        mutable: false,
+    })
+}
+
 /// Convert an SPMT expression to an RCL expression
 
 impl<'a, 'm> RCLFunctionConverter<'m> {
     pub fn convert_expression(&mut self, expr: &spmt::Expression<'a>) -> rcl::Expression<'m> {
         match expr {
             spmt::Expression::Variable(var) => {
+                if let Some(field) = self.host_fields.get(&InputKey::from(var.clone())) {
+                    return rcl::Expression::Field {
+                        base: Box::new(rcl::Expression::Variable(host_consts_variable())),
+                        field: field.clone(),
+                    };
+                }
                 let rcl_var = self.get_or_create_variable(var.clone());
 
                 rcl::Expression::Variable(rcl_var)
@@ -73,6 +88,7 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
                             self.already_converted_functions.clone(),
                             self.density_function_inputs.clone(),
                             self.density_func_name.clone(),
+                            self.host_fields.clone(),
                         );
                         if is_new {
                             self.already_converted_functions
@@ -93,6 +109,7 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
                         .expect("Density function input variable not found in converter");
                     arguments.push(rcl::Expression::Variable(v));
                 }
+                arguments.push(rcl::Expression::Variable(host_consts_variable()));
                 rcl::Expression::FunctionCall {
                     function: function_ref,
                     arguments,

@@ -3,6 +3,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use crate::orchestrate::Scale;
 use crate::orchestrate::dot::pretty_dependency_map;
 use crate::orchestrate::model::{Shader, ShaderDependency, ShaderRef};
+use crate::spmt::VariableType;
 use crate::spmt::model::{Addr, DensityFunctionRef};
 use crate::spmt::pretty::Printer;
 use crate::{orchestrate::model::Orchestration, spmt::model::SPMT};
@@ -82,11 +83,16 @@ impl<'m, 'a> Transformer<'a, 'm> {
             });
         }
 
+        let host_inputs = density_function.host_inputs.iter().map(|hi| {
+            (hi.get_name(), hi.get_type().clone())
+        }).collect::<Vec<(String, VariableType)>>();
+
         let shader = Shader {
             name: name.clone(),
             source,
             inputs: dependencies,
             permutation_tables: density_function.permutation_table_inputs.clone(),
+            host_inputs,
             source_hash: density_function.source_hash,
             df_addr: density_function.addr(),
         };

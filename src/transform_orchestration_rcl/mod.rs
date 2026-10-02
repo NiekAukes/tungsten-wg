@@ -63,6 +63,21 @@ impl<'m> OrchestrationConverter<'m> {
             mutable: false,
         });
 
+        orch_function.add_parameter(
+            builders::PERM_TABLES_PARAM_NAME.to_string(),
+            Type::Struct(format!("&{}", PERM_TABLES_STRUCT_NAME)),
+        );
+
+        let host_consts_var = Rc::new(Variable {
+            name: Some(builders::HOST_CONSTS_PARAM_NAME.to_string()),
+            t: Type::Struct(format!("&{}", transform_rcl::HOST_CONSTS_STRUCT_NAME)),
+            mutable: false,
+        });
+        orch_function.add_parameter(
+            builders::HOST_CONSTS_PARAM_NAME.to_string(),
+            Type::Struct(format!("&{}", transform_rcl::HOST_CONSTS_STRUCT_NAME)),
+        );
+
         let mut shader_output_map = HashMap::new();
 
         for (i, shader_deps) in orchestration.iter().enumerate() {
@@ -73,6 +88,7 @@ impl<'m> OrchestrationConverter<'m> {
                         dep,
                         origin_var.clone(),
                         perm_tables_var.clone(),
+                        host_consts_var.clone(),
                         i,
                         j,
                         &mut shader_output_map,
@@ -83,6 +99,7 @@ impl<'m> OrchestrationConverter<'m> {
                         dep,
                         origin_var.clone(),
                         perm_tables_var.clone(),
+                        host_consts_var.clone(),
                         i,
                         j,
                         &mut shader_output_map,
@@ -91,10 +108,6 @@ impl<'m> OrchestrationConverter<'m> {
             }
         }
 
-        orch_function.add_parameter(
-            builders::PERM_TABLES_PARAM_NAME.to_string(),
-            Type::Struct(format!("&{}", PERM_TABLES_STRUCT_NAME)),
-        );
 
         let (output_struct, struct_fields) =
             output::build_return_struct(&returns, &shader_output_map);
@@ -159,6 +172,16 @@ impl<'m> OrchestrationConverter<'m> {
             Type::Struct(format!("&{}", PERM_TABLES_STRUCT_NAME)),
         );
 
+        let host_consts_var = Rc::new(Variable {
+            name: Some(builders::HOST_CONSTS_PARAM_NAME.to_string()),
+            t: Type::Struct(format!("&{}", transform_rcl::HOST_CONSTS_STRUCT_NAME)),
+            mutable: false,
+        });
+        func.add_parameter(
+            builders::HOST_CONSTS_PARAM_NAME.to_string(),
+            Type::Struct(format!("&{}", transform_rcl::HOST_CONSTS_STRUCT_NAME)),
+        );
+
         let mut shader_output_map = HashMap::new();
 
         for (i, shader_deps) in waves.iter().enumerate() {
@@ -169,6 +192,7 @@ impl<'m> OrchestrationConverter<'m> {
                         dep,
                         origin_var.clone(),
                         perm_tables_var.clone(),
+                        host_consts_var.clone(),
                         i,
                         j,
                         &mut shader_output_map,
@@ -179,6 +203,7 @@ impl<'m> OrchestrationConverter<'m> {
                         dep,
                         origin_var.clone(),
                         perm_tables_var.clone(),
+                        host_consts_var.clone(),
                         i,
                         j,
                         &mut shader_output_map,
@@ -204,6 +229,7 @@ impl<'m> OrchestrationConverter<'m> {
         dep: &ShaderDependency<'m>,
         origin_var: Rc<Variable>,
         perm_tables_var: Rc<Variable>,
+        host_consts_var: Rc<Variable>,
         i: usize,
         j: usize,
         shader_output_map: &mut HashMap<ShaderDependency<'m>, Rc<Variable>>,
@@ -238,6 +264,7 @@ impl<'m> OrchestrationConverter<'m> {
             dep_exprs,
             dep_types,
             perm_exprs,
+            host_consts_var,
             i,
             j,
         );
@@ -256,6 +283,7 @@ impl<'m> OrchestrationConverter<'m> {
         dep: &ShaderDependency<'m>,
         origin_var: Rc<Variable>,
         perm_tables_var: Rc<Variable>,
+        host_consts_var: Rc<Variable>,
         i: usize,
         j: usize,
         shader_output_map: &mut HashMap<ShaderDependency<'m>, Rc<Variable>>,
@@ -280,6 +308,7 @@ impl<'m> OrchestrationConverter<'m> {
             dep_exprs,
             dep_types,
             perm_exprs,
+            host_consts_var,
             i,
             j,
         );

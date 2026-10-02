@@ -10,7 +10,7 @@ use super::{RCLFunctionConverter, sanitize_name, statement, types};
 use crate::orchestrate::{Flatten, Scale};
 use crate::rcl::{Parameter, Type, model as rcl};
 use crate::spmt::model::{self as spmt, Addr, Interned, Name};
-use crate::transform_rcl::InputKey;
+use crate::transform_rcl::{HOST_CONSTS_STRUCT_NAME, InputKey};
 use crate::transform_rcl::types::{convert_type, permutation_table_var_name};
 
 /// Convert an SPMT function to an RCL function with converter state
@@ -21,6 +21,7 @@ pub fn convert_function<'a, 'm>(
     already_converted_functions: HashMap<*const (), rcl::FunctionRef<'m>>,
     density_inputs: Rc<HashMap<InputKey, Parameter>>,
     parent_density_name: String,
+    host_fields: Rc<HashMap<InputKey, String>>,
 ) -> (rcl::FunctionRef<'m>, RCLFunctionConverter<'m>, bool) {
     let mut converter = RCLFunctionConverter::new_with_density_inputs(
         arena,
@@ -28,6 +29,7 @@ pub fn convert_function<'a, 'm>(
         parent_density_name.clone(),
     );
     converter.already_converted_functions = already_converted_functions;
+    converter.host_fields = host_fields.clone();
     let func_name = spmt_func
         .canonical_name
         .as_deref()
@@ -63,6 +65,10 @@ pub fn convert_function<'a, 'm>(
     for (_, input) in density_inputs.as_ref() {
         rcl_func.add_parameter(input.name.clone(), input.t.clone());
     }
+    rcl_func.add_parameter(
+        "host_consts".to_string(),
+        rcl::Type::Struct(format!("&{}", HOST_CONSTS_STRUCT_NAME)),
+    );
 
     // Register variables in converter
     for var in &spmt_func.variables {
@@ -96,6 +102,7 @@ pub fn convert_density_function<'a, 'm>(
     arena: &'m bumpalo::Bump,
     dimensions: (i32, i32, i32),
     already_converted_functions: HashMap<*const (), rcl::FunctionRef<'m>>,
+    host_fields: Rc<HashMap<InputKey, String>>,
 ) -> (
     Vec<rcl::FunctionRef<'m>>,
     rcl::FunctionRef<'m>,
@@ -203,6 +210,11 @@ pub fn convert_density_function<'a, 'm>(
         //perm_tables.push(input.clone());
     }
 
+    // add host input parameters
+    rcl_func.add_parameter(
+        "host_consts".to_string(),
+        rcl::Type::Struct(format!("&{}", HOST_CONSTS_STRUCT_NAME)),
+    );
     let density_inputs = Rc::new(density_inputs);
 
     let mut converter = RCLFunctionConverter::new_with_density_inputs(
@@ -211,6 +223,7 @@ pub fn convert_density_function<'a, 'm>(
         density_func_name.clone(),
     );
     converter.already_converted_functions = already_converted_functions;
+    converter.host_fields = host_fields.clone();
 
     for f in spmt_df.helper_functions.iter() {
         let (rcl_func, fconv, is_new) = convert_function(
@@ -219,6 +232,7 @@ pub fn convert_density_function<'a, 'm>(
             converter.already_converted_functions,
             density_inputs.clone(),
             density_func_name.clone(),
+            host_fields.clone(),
         );
         if is_new {
             rcl_funcs.push(rcl_func);

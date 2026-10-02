@@ -90,6 +90,27 @@ pub enum HostInput<'m> {
     Dynamic(Var<'m>),
 }
 
+impl HostInput<'_> {
+    pub fn get_name(&self) -> String {
+        let name  = match self {
+            HostInput::Static(var) => var.name.clone(),
+            HostInput::Dynamic(var) => var.name.clone(),
+        };
+        let Name::Named(name) = name else {
+            panic!("Expected a named variable");
+        };
+        name
+    }
+
+    pub fn get_type(&self) -> VariableType {
+        match self {
+            HostInput::Static(var) => var.t.clone(),
+            HostInput::Dynamic(var) => var.t.clone(),
+        }
+    }
+    
+}
+
 impl Ord for PermutationTableInput {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         use PermutationTableInput::*;
