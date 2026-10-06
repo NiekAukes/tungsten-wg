@@ -1,7 +1,10 @@
 /*
-Conversion from SPMT (Spatial Model Transform) to RCL (Rust Code Language).
-This module provides utilities to translate SPMT density functions into
-low-level CPU code representations suitable for compilation.
+Conversion from SPMT to RCL, the CPU-side (Rust) code model.
+This module translates SPMT density functions into RCL functions.
+
+Pipeline: `convert_spmt_to_inline_rcl` collects the density functions scheduled by the
+orchestration, builds one shared `HostConsts` struct for all host inputs, then converts
+each (density function, dimensions) pair via `function::convert_density_function`.
 
 The transformation is organized into focused sub-modules:
 - expression: Converts SPMT expressions to RCL expressions
@@ -23,28 +26,37 @@ pub mod function;
 pub mod statement;
 pub mod types;
 
+/// Names of runtime structs that the generated code refers to by name.
 pub const PERM_TABLES_STRUCT_NAME: &str = "PermutationTables";
 pub const PERLIN_NOISE_SAMPLER_STRUCT_NAME: &str = "PerlinNoiseSampler";
 pub const BASE3D_NOISE_SAMPLER_STRUCT_NAME: &str = "InterpolatedNoiseSampler";
+/// Struct holding all host-provided inputs; passed to every generated function as `host_consts`.
 pub const HOST_CONSTS_STRUCT_NAME: &str = "HostConsts";
+
 /// Converter state for transforming SPMT to RCL
 pub struct RCLFunctionConverter<'m> {
     /// Maps SPMT variable addresses to RCL variables
     var_map: HashMap<InputKey, Rc<rcl::Variable>>,
     /// Counter for generating unique function names
     function_counter: usize,
+    /// Cache of converted functions keyed by SPMT address, so shared helpers are emitted once.
     pub already_converted_functions: HashMap<*const (), rcl::FunctionRef<'m>>,
     arena: &'m bumpalo::Bump,
+    /// Density inputs of the function being converted, exposed as parameters.
     density_function_inputs: Rc<HashMap<InputKey, rcl::Parameter>>,
     /// Cache for concrete variable names (used for anonymous variables).
     name_cache: HashMap<*const (), String>,
     /// Counter for generating unique anonymous variable names.
     anon_counter: usize,
+    /// Name of the enclosing density function; used as a prefix for helper functions.
     density_func_name: String,
     /// Maps SPMT host input variables to their field name in the `HostConsts` struct.
     pub host_fields: Rc<HashMap<InputKey, String>>,
 }
 
+/// Identity key for a variable or density input.
+/// Plain variables use their address with zero dimensions and default scale;
+/// density inputs additionally distinguish by dimensions and scaled origin.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct InputKey {
     density_function: *const (),
@@ -102,6 +114,7 @@ impl<'m> RCLFunctionConverter<'m> {
         }
     }
 
+    /// Create a converter whose variable map is pre-seeded with the density inputs as immutable variables.
     pub fn new_with_density_inputs(
         arena: &'m bumpalo::Bump,
         density_function_inputs: Rc<HashMap<InputKey, rcl::Parameter>>,
@@ -148,10 +161,12 @@ impl<'m> RCLFunctionConverter<'m> {
         }
     }
 
+    /// Look up an already-registered variable without creating one.
     pub fn get_variable(&self, addr: &InputKey) -> Option<Rc<rcl::Variable>> {
         self.var_map.get(addr).cloned()
     }
 
+    /// Insert a variable under an arbitrary key (e.g. one not backed by an SPMT variable).
     pub fn add_raw_variable(&mut self, addr: InputKey, rcl_var: Rc<rcl::Variable>) {
         self.var_map.insert(addr, rcl_var);
     }
@@ -211,14 +226,8 @@ pub fn sanitize_name(name: &str) -> String {
         .replace('-', "_")
 }
 
-/// Convert an SPMT function to an RCL function
-// pub fn spmt_function_to_rcl<'m>(
-//     spmt_func: &spmt::Function<'m>,
-//     arena: &'m bumpalo::Bump,
-// ) -> (rcl::Function<'m>, RCLFunctionConverter<'m>) {
-//     function::convert_function(spmt_func, arena)
-// }
-
+/// Convert one density function (at the given dimensions) and append its helper functions,
+/// constants and main function to `rcl_model`. Returns the converter so callers can reuse its cache.
 pub fn add_density_to_rcl_model<'a, 'm>(
     rcl_model: &mut rcl::RCL<'m>,
     spmt_df: spmt::DensityFunctionRef<'a>,
@@ -241,6 +250,7 @@ pub fn add_density_to_rcl_model<'a, 'm>(
     converter
 }
 
+/// Convert every density function scheduled in `orchestration` into a single RCL model.
 pub fn convert_spmt_to_inline_rcl<'a, 'm>(
     program: &'a spmt::SPMT<'a>,
     orchestration: &Vec<Vec<ShaderDependency>>,

@@ -13,8 +13,11 @@ use crate::spmt::model::{self as spmt, Addr, Interned, Name};
 use crate::transform_rcl::{HOST_CONSTS_STRUCT_NAME, InputKey};
 use crate::transform_rcl::types::{convert_type, permutation_table_var_name};
 
-/// Convert an SPMT function to an RCL function with converter state
-
+/// Convert an SPMT helper function to an RCL function.
+///
+/// The function name is prefixed with the parent density function so helpers are unique per density.
+/// Density inputs and `host_consts` are appended as extra parameters.
+/// Returns `(function, converter, is_new)`; `is_new` is false when a cached function was reused.
 pub fn convert_function<'a, 'm>(
     spmt_func: &spmt::Function<'a>,
     arena: &'m bumpalo::Bump,
@@ -96,7 +99,11 @@ pub fn convert_function<'a, 'm>(
     (rcl_func_ref, converter, true)
 }
 
-/// Convert an SPMT density function to an RCL function with converter state
+/// Convert an SPMT density function to an RCL function.
+///
+/// The generated function loops over every position in `dimensions`, evaluates the body,
+/// and stores the returned value into the flattened `out` array.
+/// Returns `(helper functions, main function, converter, constants)`.
 pub fn convert_density_function<'a, 'm>(
     spmt_df: spmt::DensityFunctionRef<'a>,
     arena: &'m bumpalo::Bump,
@@ -118,8 +125,7 @@ pub fn convert_density_function<'a, 'm>(
     let density_func_name = derive_density_function_name(spmt_df, dimensions);
     let mut rcl_func = rcl::Function::new(Some(density_func_name.clone()), None);
 
-    // Add position parameters (x, y, z)
-    // and origin parameters (ox, oy, oz)
+    // Output buffer, plus origin/scale parameters.
     //rcl_func.add_parameter("pos3".to_string(), rcl::Type::Struct("Pos3".to_string()));
     rcl_func.add_parameter(
         "out".to_string(),
@@ -168,6 +174,7 @@ pub fn convert_density_function<'a, 'm>(
             Name::Anonymous => format!("input_{}", input.density_function.addr() as usize),
         };
 
+        // Single-cell inputs are passed by value, larger ones as an array reference.
         let dimensions = input.dimensions.flatten();
         if dimensions == 1 {
             rcl_func.add_parameter(
@@ -301,6 +308,7 @@ pub fn convert_density_function<'a, 'm>(
         rcl_func.add_statement(converted_stmt);
     }
 
+    // The final return becomes an array write inside the loop.
     let Some(rcl::Statement::Return(Some(end_expr))) = rcl_func.body.pop() else {
         panic!("Density function must end with a return statement");
     };
@@ -325,6 +333,7 @@ pub fn convert_density_function<'a, 'm>(
     (rcl_funcs, rcl_func_ref, converter, constants)
 }
 
+/// Parameter type for a permutation table: a reference to the matching sampler struct.
 fn get_permutation_table_type(input: &spmt::PermutationTableInput) -> rcl::Type {
     match input {
         spmt::PermutationTableInput::PerlinNoise { .. } => rcl::Type::Ref(Box::new(
@@ -336,6 +345,7 @@ fn get_permutation_table_type(input: &spmt::PermutationTableInput) -> rcl::Type 
     }
 }
 
+/// Wrap `body` in a `for pos3 in iter_3d(x, y, z)` loop over the given dimensions.
 fn wrap_in_loop<'a>(
     body: Vec<rcl::Statement<'a>>,
     pos3_var: Rc<rcl::Variable>,
@@ -361,8 +371,8 @@ fn wrap_in_loop<'a>(
     }
 }
 
+/// Flat index of `pos3` into the output array: `x * dim_y * dim_z + y * dim_z + z`.
 fn pos3_index<'m>(pos3_var: Rc<rcl::Variable>) -> rcl::Expression<'m> {
-    // pos3.x * dimensions.y * dimensions.z + pos3.y * dimensions.z + pos3.z
     rcl::Expression::LateBoundCall {
         function_name: "index".to_string(),
         argument_types: vec![rcl::Type::Struct("Pos3".to_string())],
@@ -371,6 +381,7 @@ fn pos3_index<'m>(pos3_var: Rc<rcl::Variable>) -> rcl::Expression<'m> {
     }
 }
 
+/// Name of the generated function, e.g. `foo_d16x16x16`; dimensions keep per-size variants distinct.
 fn derive_density_function_name(spmt_df: spmt::DensityFunctionRef<'_>, dimensions: (i32, i32, i32)) -> String {
         let density_func_name = spmt_df
         .canonical_name

@@ -23,9 +23,9 @@ pub fn host_consts_variable() -> Rc<rcl::Variable> {
     })
 }
 
-/// Convert an SPMT expression to an RCL expression
-
 impl<'a, 'm> RCLFunctionConverter<'m> {
+    /// Convert an SPMT expression to an RCL expression.
+    /// Host inputs become `host_consts.<field>` accesses.
     pub fn convert_expression(&mut self, expr: &spmt::Expression<'a>) -> rcl::Expression<'m> {
         match expr {
             spmt::Expression::Variable(var) => {
@@ -282,6 +282,7 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
         }
     }
 
+    /// Convert an argument, casting to f32/i32 unless it is already a matching literal.
     fn convert_argument(
         &mut self,
         arg: &spmt::Expression<'a>,
@@ -305,6 +306,7 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
         cast
     }
 
+    /// Convert both operands of a binary op, inserting casts where Rust would not coerce implicitly.
     pub fn try_convert_arguments_binary_op(
         &mut self,
         left: &spmt::Expression<'a>,
@@ -331,7 +333,7 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
         };
 
         match (op, ltype, rtype) {
-            // If one side is vec3<f32> and the other is vec3<i32>, convert the i32 to f32
+            // Arithmetic between i32 and bool: cast the bool to i32.
             (
                 spmt::BinaryOperator::Add
                 | spmt::BinaryOperator::Subtract
@@ -349,6 +351,7 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
             _ => (left_h, right_h), // No conversion needed or possible
         }
     }
+    /// Convert `source` and cast it to `target_type` if its derived type differs.
     pub fn convert_expression_to_type(
         &mut self,
         source: &spmt::Expression<'a>,
@@ -370,8 +373,8 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
     }
 }
 
+/// Late-bound `index(pos3)` call yielding the position as an f32.
 fn convert_pos3_to_position_expression<'m>(p: rcl::Expression<'m>) -> rcl::Expression<'m> {
-    // new method: as_index(pos3, x, y)
     rcl::Expression::LateBoundCall {
         function_name: "index".to_string(),
         argument_types: vec![rcl::Type::Struct("Pos3".to_string())],

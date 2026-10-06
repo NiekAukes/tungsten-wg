@@ -12,9 +12,8 @@ use crate::rcl::model as rcl;
 use crate::spmt::model::{self as spmt, Addr};
 use crate::transform_rcl::InputKey;
 
-/// Convert an SPMT statement to an RCL statement
-
 impl<'a, 'm> RCLFunctionConverter<'m> {
+    /// Convert an SPMT statement to an RCL statement.
     pub fn convert_statement(&mut self, stmt: &spmt::Statement<'a>) -> rcl::Statement<'m> {
         match stmt {
             spmt::Statement::Assign { target, value } => {

@@ -24,7 +24,6 @@ pub fn convert_type(t: &spmt::VariableType) -> rcl::Type {
         )),
         spmt::VariableType::Extern(name) => rcl::Type::Struct(sanitize_name(name)),
         spmt::VariableType::Array(element_type, size) => {
-            // For simplicity, we can represent arrays as structs with fields like element_0, element_1, etc.
             rcl::Type::Array(Box::new(convert_type(element_type)), *size)
         }
         spmt::VariableType::Bool => rcl::Type::Bool,
@@ -57,6 +56,7 @@ pub fn convert_unary_op(op: spmt::UnaryOperator) -> rcl::UnaryOperator {
     }
 }
 
+/// Parameter name for a permutation table; stable so callers and callees agree on it.
 pub fn permutation_table_var_name(perm_table: &spmt::PermutationTableInput) -> String {
     match perm_table {
         spmt::PermutationTableInput::PerlinNoise {
