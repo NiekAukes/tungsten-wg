@@ -24,6 +24,8 @@ pub mod orchestrate;
 pub mod rcl;
 /// Single Program Multiple Thread (SPMT) Intermediate Representation definitions.
 pub mod spmt;
+
+pub mod spmt_optimize;
 /// Transformations from SPMT IR to CUDA AST.
 pub mod transform_cuda;
 /// Transformations from base orchestration to CUDA-specific orchestration.
@@ -171,6 +173,8 @@ pub fn compile(program: &Program, config: &CompilerConfig) -> Result<CompiledOut
     let orchestration_arena = Bump::new();
     let orchestration = orchestrate::transform::transform_from_spmt(program, &orchestration_arena);
     let waves = orchestration.arrange_waves();
+
+    let optimize = spmt_optimize::conversion::convert(program).unwrap();
 
     if config.generate_wave_orchestration_graph {
         let mut printer = Printer::new();

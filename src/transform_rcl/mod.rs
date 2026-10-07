@@ -260,6 +260,7 @@ pub fn convert_spmt_to_inline_rcl<'a, 'm>(
     let mut already_converted_functions = HashMap::new();
     let mut functions_to_convert = HashSet::new();
 
+    // Collect all (dimensions, density function) pairs that need to be converted.
     for wave in orchestration {
         for dependency in wave {
             for df in program
