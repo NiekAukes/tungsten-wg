@@ -295,6 +295,7 @@ pub fn convert_spmt_to_inline_rcl<'a, 'm>(
             host_fields.insert(key, name);
         }
     }
+    host_struct.set_repr_c(true);
     rcl_model
         .structs
         .push(spmt::Interned::new(arena.alloc(host_struct)));

@@ -93,6 +93,45 @@ impl<'m> Expression<'m> {
             expr: Box::new(self.into()),
         }
     }
+
+    pub fn shl(self, rhs: impl Into<Expression<'m>>) -> Expression<'m> {
+        Expression::BinaryOp {
+            op: BinaryOperator::ShiftLeft,
+            left: Box::new(self),
+            right: Box::new(rhs.into()),
+        }
+    }
+
+    pub fn shr(self, rhs: impl Into<Expression<'m>>) -> Expression<'m> {
+        Expression::BinaryOp {
+            op: BinaryOperator::ShiftRight,
+            left: Box::new(self),
+            right: Box::new(rhs.into()),
+        }
+    }
+
+    pub fn bitor(self, rhs: impl Into<Expression<'m>>) -> Expression<'m> {
+        Expression::BinaryOp {
+            op: BinaryOperator::BitOr,
+            left: Box::new(self),
+            right: Box::new(rhs.into()),
+        }
+    }
+
+    pub fn bitand(self, rhs: impl Into<Expression<'m>>) -> Expression<'m> {
+        Expression::BinaryOp {
+            op: BinaryOperator::BitAnd,
+            left: Box::new(self),
+            right: Box::new(rhs.into()),
+        }
+    }
+    pub fn bitxor(self, rhs: impl Into<Expression<'m>>) -> Expression<'m> {
+        Expression::BinaryOp {
+            op: BinaryOperator::BitXor,
+            left: Box::new(self),
+            right: Box::new(rhs.into()),
+        }
+    }
 }
 
 impl<'m> Var<'m> {
@@ -115,6 +154,46 @@ impl<'m> Var<'m> {
         Expression::ExplicitCast {
             to: to_type,
             expr: Box::new(self.into()),
+        }
+    }
+
+    pub fn shl(self, rhs: impl Into<Expression<'m>>) -> Expression<'m> {
+        Expression::BinaryOp {
+            op: BinaryOperator::ShiftLeft,
+            left: Box::new(self.into()),
+            right: Box::new(rhs.into()),
+        }
+    }
+
+    pub fn shr(self, rhs: impl Into<Expression<'m>>) -> Expression<'m> {
+        Expression::BinaryOp {
+            op: BinaryOperator::ShiftRight,
+            left: Box::new(self.into()),
+            right: Box::new(rhs.into()),
+        }
+    }
+
+    pub fn bitor(self, rhs: impl Into<Expression<'m>>) -> Expression<'m> {
+        Expression::BinaryOp {
+            op: BinaryOperator::BitOr,
+            left: Box::new(self.into()),
+            right: Box::new(rhs.into()),
+        }
+    }
+
+    pub fn bitand(self, rhs: impl Into<Expression<'m>>) -> Expression<'m> {
+        Expression::BinaryOp {
+            op: BinaryOperator::BitAnd,
+            left: Box::new(self.into()),
+            right: Box::new(rhs.into()),
+        }
+    }
+
+    pub fn bitxor(self, rhs: impl Into<Expression<'m>>) -> Expression<'m> {
+        Expression::BinaryOp {
+            op: BinaryOperator::BitXor,
+            left: Box::new(self.into()),
+            right: Box::new(rhs.into()),
         }
     }
 }

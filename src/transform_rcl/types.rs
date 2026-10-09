@@ -45,6 +45,11 @@ pub fn convert_binary_op(op: spmt::BinaryOperator) -> rcl::BinaryOperator {
         spmt::BinaryOperator::GreaterEqual => rcl::BinaryOperator::GreaterEqual,
         spmt::BinaryOperator::And => rcl::BinaryOperator::And,
         spmt::BinaryOperator::Or => rcl::BinaryOperator::Or,
+        spmt::BinaryOperator::ShiftLeft => rcl::BinaryOperator::LeftShift,
+        spmt::BinaryOperator::ShiftRight => rcl::BinaryOperator::RightShift,
+        spmt::BinaryOperator::BitOr => rcl::BinaryOperator::BitwiseOr,
+        spmt::BinaryOperator::BitAnd => rcl::BinaryOperator::BitwiseAnd,
+        spmt::BinaryOperator::BitXor => rcl::BinaryOperator::BitwiseXor,
     }
 }
 

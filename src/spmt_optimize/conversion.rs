@@ -37,7 +37,10 @@ pub enum ConvertError {
     /// A helper function (not a density function) reads a density input.
     DensityInputInHelperFunction { context: String },
     /// A constant's initializer uses something that is not a constant expression.
-    NotConstant { constant: String, found: &'static str },
+    NotConstant {
+        constant: String,
+        found: &'static str,
+    },
 }
 
 impl fmt::Display for ConvertError {
@@ -50,16 +53,25 @@ impl fmt::Display for ConvertError {
                 write!(f, "in `{context}`: assignment to constant/host input {var}")
             }
             ConvertError::DynamicHostInputUnsupported => {
-                write!(f, "dynamic host inputs are not supported by the optimizer model")
+                write!(
+                    f,
+                    "dynamic host inputs are not supported by the optimizer model"
+                )
             }
             ConvertError::HostInputNotNamed { name } => {
-                write!(f, "host input must have a unique `Named` name, found {name}")
+                write!(
+                    f,
+                    "host input must have a unique `Named` name, found {name}"
+                )
             }
             ConvertError::DensityInputInHelperFunction { context } => {
                 write!(f, "helper function `{context}` reads a density input")
             }
             ConvertError::NotConstant { constant, found } => {
-                write!(f, "constant `{constant}` is not a constant expression ({found})")
+                write!(
+                    f,
+                    "constant `{constant}` is not a constant expression ({found})"
+                )
             }
         }
     }
@@ -163,6 +175,11 @@ impl<'m> Scope<'m> {
     }
 
     fn find_named_var(&self, target: &old::Var<'m>) -> Option<Ref<new::Var>> {
+        println!("Looking for named var: {:?}", target.name);
+        println!("Current vars in scope:");
+        for (ref_var, new_var) in self.vars.iter() {
+            println!("  {:?}: {:?}", ref_var, new_var.name);
+        }
         for (ref_var, new_var) in self.vars.iter() {
             let (Named(name), Named(target_name)) = (&new_var.name, &target.name) else {
                 continue;
@@ -243,7 +260,10 @@ impl<'m> Converter<'m> {
 
     // ----- density functions -------------------------------------------------
 
-    fn density_function(&mut self, df: old::DensityFunctionRef<'m>) -> Result<Ref<new::ComputeUnit>> {
+    fn density_function(
+        &mut self,
+        df: old::DensityFunctionRef<'m>,
+    ) -> Result<Ref<new::ComputeUnit>> {
         if let Some(&r) = self.compute_units.get(&df) {
             return Ok(r);
         }
@@ -515,7 +535,11 @@ impl<'m> Converter<'m> {
         stmts.iter().map(|s| self.statement(scope, s)).collect()
     }
 
-    fn statement(&mut self, scope: &mut Scope<'m>, s: &old::Statement<'m>) -> Result<new::Statement> {
+    fn statement(
+        &mut self,
+        scope: &mut Scope<'m>,
+        s: &old::Statement<'m>,
+    ) -> Result<new::Statement> {
         use new::Statement as N;
         use old::Statement as S;
 
@@ -527,10 +551,9 @@ impl<'m> Converter<'m> {
                         return Err(ConvertError::AssignToReadOnly {
                             context: scope.label.clone(),
                             var: format!("{:?}", target.name),
-                        })
+                        });
                     }
                     // None if target.name == Named("origin".into()) => {
-
                     None if scope.find_named_var(target).is_some() => {
                         let r = scope.find_named_var(target).unwrap();
                         self.warn(ConvertError::UnknownVariable {
@@ -538,7 +561,7 @@ impl<'m> Converter<'m> {
                             var: format!("{:?}", target.name),
                         });
                         r
-                    },
+                    }
                     // None => return Err(scope.unknown_var(target)),
                     None => {
                         panic!("Unknown variable: {:?}", target.name);
@@ -582,7 +605,11 @@ impl<'m> Converter<'m> {
         es.iter().map(|e| self.expr(scope, e)).collect()
     }
 
-    fn boxed(&mut self, scope: &mut Scope<'m>, e: &old::Expression<'m>) -> Result<Box<new::Expression>> {
+    fn boxed(
+        &mut self,
+        scope: &mut Scope<'m>,
+        e: &old::Expression<'m>,
+    ) -> Result<Box<new::Expression>> {
         Ok(Box::new(self.expr(scope, e)?))
     }
 
@@ -605,7 +632,8 @@ impl<'m> Converter<'m> {
                     });
                     N::Variable(r)
                 } else {
-                    return Err(scope.unknown_var(v));
+                    // return Err(scope.unknown_var(v));
+                    panic!("Unknown variable: {:?}", **v);
                 }
             }
             E::Float(x) => N::Float(*x),
@@ -829,6 +857,11 @@ fn binary_op(op: old::BinaryOperator) -> new::BinaryOperator {
         O::GreaterEqual => N::GreaterEqual,
         O::And => N::And,
         O::Or => N::Or,
+        O::ShiftLeft => N::ShiftLeft,
+        O::ShiftRight => N::ShiftRight,
+        O::BitOr => N::BitOr,
+        O::BitAnd => N::BitAnd,
+        O::BitXor => N::BitXor,
     }
 }
 

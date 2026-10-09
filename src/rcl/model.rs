@@ -51,6 +51,7 @@ pub struct Parameter {
 pub struct Struct {
     pub name: String,
     pub fields: Vec<(String, Type)>,
+    pub is_repr_c: bool,
 }
 
 /// Variable with type information
@@ -387,7 +388,12 @@ impl Struct {
         Struct {
             name,
             fields: Vec::new(),
+            is_repr_c: false,
         }
+    }
+
+    pub fn set_repr_c(&mut self, is_repr_c: bool) {
+        self.is_repr_c = is_repr_c;
     }
 
     pub fn add_field(&mut self, name: String, t: Type) {
@@ -396,7 +402,7 @@ impl Struct {
                 panic!("Field already exists: {}", name);
             }
         }
-        
+
         self.fields.push((name, t));
     }
 }

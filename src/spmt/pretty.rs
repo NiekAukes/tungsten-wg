@@ -357,6 +357,11 @@ impl<'m> PrettyPrint for Expression<'m> {
                     BinaryOperator::GreaterEqual => " >= ",
                     BinaryOperator::And => " && ",
                     BinaryOperator::Or => " || ",
+                    BinaryOperator::ShiftLeft => " << ",
+                    BinaryOperator::ShiftRight => " >> ",
+                    BinaryOperator::BitOr => " | ",
+                    BinaryOperator::BitAnd => " & ",
+                    BinaryOperator::BitXor => " ^ ",
                 });
                 right.pretty(p);
                 p.push(")");

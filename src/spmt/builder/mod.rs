@@ -267,6 +267,7 @@ impl<'m> Builder<'m> {
             variables: locals,
             helper_functions: helpers,
             host_inputs: Vec::new(),
+            return_type: self.return_type,
             constants,
             source_hash,
         }

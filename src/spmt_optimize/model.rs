@@ -1,4 +1,9 @@
-use std::{fmt::Debug, hash::Hash, marker::PhantomData, sync::atomic::{AtomicU32, Ordering}};
+use std::{
+    fmt::Debug,
+    hash::Hash,
+    marker::PhantomData,
+    sync::atomic::{AtomicU32, Ordering},
+};
 
 use crate::spmt::{Name, VariableType};
 
@@ -7,7 +12,9 @@ static NEXT_TAG: AtomicU32 = AtomicU32::new(1);
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub struct OwnerTag(u32);
 impl OwnerTag {
-    pub fn fresh() -> Self { Self(NEXT_TAG.fetch_add(1, Ordering::Relaxed)) }
+    pub fn fresh() -> Self {
+        Self(NEXT_TAG.fetch_add(1, Ordering::Relaxed))
+    }
 }
 
 pub struct Ref<T> {
@@ -48,13 +55,14 @@ impl<T> Hash for Ref<T> {
 
 impl<T> std::fmt::Debug for Ref<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Ref")
-            .field("idx", &self.idx)
-            .finish()
+        f.debug_struct("Ref").field("idx", &self.idx).finish()
     }
 }
 
-struct Slot<T> { generation: u32, value: Option<T> }
+struct Slot<T> {
+    generation: u32,
+    value: Option<T>,
+}
 impl<T: Debug> Debug for Slot<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.value.fmt(f)
@@ -67,9 +75,14 @@ pub struct Arena<T> {
     free: Vec<u32>,
 }
 
-
 impl<T> Arena<T> {
-    pub fn new() -> Self { Self { tag: OwnerTag::fresh(), slots: vec![], free: vec![] } }
+    pub fn new() -> Self {
+        Self {
+            tag: OwnerTag::fresh(),
+            slots: vec![],
+            free: vec![],
+        }
+    }
 
     pub fn insert(&mut self, v: T) -> Ref<T> {
         let (idx, generation) = if let Some(i) = self.free.pop() {
@@ -77,25 +90,41 @@ impl<T> Arena<T> {
             s.value = Some(v);
             (i, s.generation)
         } else {
-            self.slots.push(Slot { generation: 0, value: Some(v) });
+            self.slots.push(Slot {
+                generation: 0,
+                value: Some(v),
+            });
             (self.slots.len() as u32 - 1, 0)
         };
-        Ref { tag: self.tag, idx, generation, _m: PhantomData }
+        Ref {
+            tag: self.tag,
+            idx,
+            generation,
+            _m: PhantomData,
+        }
     }
 
     pub fn try_get(&self, r: Ref<T>) -> Option<&T> {
-        assert_eq!(r.tag, self.tag, "Ref used on the wrong arena");   // misuse: always panic
+        assert_eq!(r.tag, self.tag, "Ref used on the wrong arena"); // misuse: always panic
         let s = self.slots.get(r.idx as usize)?;
-        if s.generation == r.generation { s.value.as_ref() } else { None }  // stale: recoverable
+        if s.generation == r.generation {
+            s.value.as_ref()
+        } else {
+            None
+        } // stale: recoverable
     }
     pub fn get(&self, r: Ref<T>) -> &T {
         self.try_get(r).expect("stale Ref (slot was removed)")
     }
-    
+
     pub fn try_get_mut(&mut self, r: Ref<T>) -> Option<&mut T> {
         assert_eq!(r.tag, self.tag, "Ref used on the wrong arena");
         let s = self.slots.get_mut(r.idx as usize)?;
-        if s.generation == r.generation { s.value.as_mut() } else { None }
+        if s.generation == r.generation {
+            s.value.as_mut()
+        } else {
+            None
+        }
     }
 
     pub fn get_mut(&mut self, r: Ref<T>) -> &mut T {
@@ -105,7 +134,9 @@ impl<T> Arena<T> {
     pub fn remove(&mut self, r: Ref<T>) -> Option<T> {
         assert_eq!(r.tag, self.tag, "Ref used on the wrong arena");
         let s = self.slots.get_mut(r.idx as usize)?;
-        if s.generation != r.generation { return None; }
+        if s.generation != r.generation {
+            return None;
+        }
         let v = s.value.take()?;
         s.generation = s.generation.wrapping_add(1);
         self.free.push(r.idx);
@@ -115,12 +146,22 @@ impl<T> Arena<T> {
     pub fn iter(&self) -> impl Iterator<Item = (Ref<T>, &T)> {
         let tag = self.tag;
         self.slots.iter().enumerate().filter_map(move |(i, s)| {
-            s.value.as_ref().map(|v| (Ref { tag, idx: i as u32, generation: s.generation, _m: PhantomData }, v))
+            s.value.as_ref().map(|v| {
+                (
+                    Ref {
+                        tag,
+                        idx: i as u32,
+                        generation: s.generation,
+                        _m: PhantomData,
+                    },
+                    v,
+                )
+            })
         })
     }
 }
 
-impl<T> std::ops::Index<Ref<T>> for Arena<T> { 
+impl<T> std::ops::Index<Ref<T>> for Arena<T> {
     type Output = T;
 
     fn index(&self, r: Ref<T>) -> &Self::Output {
@@ -150,7 +191,6 @@ impl<T> PartialEq for Arena<T> {
 
 impl<T> Eq for Arena<T> {}
 
-
 #[derive(PartialEq, Debug, Clone)]
 pub struct EntryPoint {
     pub density_function: Ref<ComputeUnit>,
@@ -171,7 +211,7 @@ pub enum ComputeUnit {
 
         /// An identifier for the source of this density function, used to detect changes and cache results.
         source_hash: u64,
-    }
+    },
 }
 #[derive(PartialEq, Debug, Clone)]
 pub struct DensityInput {
@@ -181,7 +221,6 @@ pub struct DensityInput {
     pub scaled_position: (f64, f64, f64),
     pub dimensions: (i32, i32, i32),
 }
-
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PermutationTableInput {
@@ -198,10 +237,7 @@ pub enum PermutationTableInput {
 pub enum HostInput {
     /// A statically computed input from the host environment.
     /// Asked when starting the orchestration.
-    Static {
-        name: Name,
-        t: VariableType,
-    },
+    Static { name: Name, t: VariableType },
     /// A dynamically computed input from the host environment.
     /// Asked during the orchestration as needed. This can pose performance benefits
     /// as it computes while the GPU is busy.
@@ -211,7 +247,7 @@ pub enum HostInput {
 
 impl HostInput {
     pub fn get_name(&self) -> String {
-        let name  = match self {
+        let name = match self {
             HostInput::Static { name, .. } => name.clone(),
             HostInput::Dynamic => panic!("Dynamic host input does not have a name"),
         };
@@ -227,9 +263,7 @@ impl HostInput {
             HostInput::Dynamic => panic!("Dynamic host input does not have a type"),
         }
     }
-    
 }
-
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Var {
@@ -249,7 +283,6 @@ pub struct Function {
     pub return_type: VariableType,
     // helper_functions: Vec<Ref<Function>>,
     // constants: Vec<Ref<Constant>>,
-
     /// An identifier for the source of this density function, used to detect changes and cache results.
     pub source_hash: u64,
 }
@@ -262,7 +295,6 @@ pub struct OptimizedProgram {
     pub host_inputs: Arena<HostInput>,
     pub permutation_tables: Arena<PermutationTableInput>,
 }
-
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
@@ -426,6 +458,11 @@ pub enum BinaryOperator {
     GreaterEqual,
     And,
     Or,
+    ShiftLeft,
+    ShiftRight,
+    BitOr,
+    BitAnd,
+    BitXor,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

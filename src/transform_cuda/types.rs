@@ -48,6 +48,11 @@ pub fn convert_binary_op(op: spmt::BinaryOperator) -> cuda::BinaryOperator {
         spmt::BinaryOperator::GreaterEqual => cuda::BinaryOperator::GreaterEqual,
         spmt::BinaryOperator::And => cuda::BinaryOperator::And,
         spmt::BinaryOperator::Or => cuda::BinaryOperator::Or,
+        spmt::BinaryOperator::ShiftLeft => cuda::BinaryOperator::LeftShift,
+        spmt::BinaryOperator::ShiftRight => cuda::BinaryOperator::RightShift,
+        spmt::BinaryOperator::BitOr => cuda::BinaryOperator::BitwiseOr,
+        spmt::BinaryOperator::BitAnd => cuda::BinaryOperator::BitwiseAnd,
+        spmt::BinaryOperator::BitXor => cuda::BinaryOperator::BitwiseXor,
     }
 }
 

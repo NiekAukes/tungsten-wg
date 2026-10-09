@@ -42,6 +42,8 @@ pub struct DensityFunction<'m> {
     pub helper_functions: Vec<FunctionRef<'m>>,
     pub constants: Vec<(Var<'m>, Expression<'m>)>,
 
+    pub return_type: VariableType,
+
     /// An identifier for the source of this density function, used to detect changes and cache results.
     pub source_hash: u64,
 }
@@ -92,7 +94,7 @@ pub enum HostInput<'m> {
 
 impl HostInput<'_> {
     pub fn get_name(&self) -> String {
-        let name  = match self {
+        let name = match self {
             HostInput::Static(var) => var.name.clone(),
             HostInput::Dynamic(var) => var.name.clone(),
         };
@@ -108,7 +110,6 @@ impl HostInput<'_> {
             HostInput::Dynamic(var) => var.t.clone(),
         }
     }
-    
 }
 
 impl Ord for PermutationTableInput {
@@ -328,6 +329,11 @@ pub enum BinaryOperator {
     GreaterEqual,
     And,
     Or,
+    ShiftLeft,
+    ShiftRight,
+    BitOr,
+    BitAnd,
+    BitXor,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

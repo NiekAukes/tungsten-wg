@@ -153,6 +153,10 @@ impl RustCodeGenerator {
 
     /// Generate Rust code for a struct definition
     fn generate_struct(&self, p: &mut Printer, struct_def: &icl::StructRef<'_>) {
+        if struct_def.is_repr_c {
+            p.line("#[repr(C)]");
+        }
+
         p.push("pub struct ");
         p.push(&struct_def.name);
         p.line(" {");
