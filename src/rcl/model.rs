@@ -26,6 +26,22 @@ pub struct RCL<'m> {
     pub main_functions: Vec<FunctionRef<'m>>,
     pub import_statements: Vec<String>,
     pub constants: Vec<Constant<'m>>,
+    pub impls: Vec<Impl<'m>>,
+}
+
+/// An `impl` block; all methods are emitted as `pub`.
+#[derive(Debug, Clone)]
+pub struct Impl<'m> {
+    pub type_name: String,
+    pub methods: Vec<FunctionRef<'m>>,
+}
+
+/// How a method receives `self`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Receiver {
+    Value,
+    Ref,
+    MutRef,
 }
 
 /// A low-level CPU function with typed parameters and return type
@@ -37,6 +53,8 @@ pub struct Function<'m> {
     pub body: Vec<Statement<'m>>,
     pub variables: Vec<Rc<Variable>>,
     pub inline: bool,
+    /// Set for methods inside an `impl`; printed before `parameters`.
+    pub receiver: Option<Receiver>,
 }
 
 /// A parameter to a function
@@ -52,6 +70,7 @@ pub struct Struct {
     pub name: String,
     pub fields: Vec<(String, Type)>,
     pub is_repr_c: bool,
+    pub derivations: Vec<String>,
 }
 
 /// Variable with type information
@@ -88,6 +107,8 @@ pub enum Type {
     // Composite types
     Pointer(Box<Type>),
     Ref(Box<Type>),
+    MutRef(Box<Type>),
+    Box(Box<Type>),
     Struct(String),
     Array(Box<Type>, usize),
     ArrayRef(Box<Type>, usize),
@@ -130,6 +151,8 @@ impl std::fmt::Display for Type {
             Type::Void => write!(f, "()"),
             Type::Pointer(t) => write!(f, "*{}", t),
             Type::Ref(t) => write!(f, "&{}", t),
+            Type::MutRef(t) => write!(f, "&mut {}", t),
+            Type::Box(t) => write!(f, "Box<{}>", t),
             Type::Struct(name) => write!(f, "{}", name),
             Type::Array(t, size) => write!(f, "[{}; {}]", t, size),
             Type::ArrayRef(t, size) => write!(f, "&[{}; {}]", t, size),
@@ -157,6 +180,12 @@ pub enum Statement<'m> {
     ArrayAssign {
         target: Rc<Variable>,
         index: Expression<'m>,
+        value: Expression<'m>,
+    },
+
+    // Assignment to an arbitrary place, e.g. `buffers.x[i] = v` or `auto_consts.a = v`
+    AssignPlace {
+        target: Expression<'m>,
         value: Expression<'m>,
     },
 
@@ -342,6 +371,9 @@ pub enum UnaryOperator {
 
     // Bitwise
     BitwiseNot,
+
+    // Reference
+    Ref(bool),
 }
 
 impl<'m> Function<'m> {
@@ -353,6 +385,7 @@ impl<'m> Function<'m> {
             body: Vec::new(),
             variables: Vec::new(),
             inline: false,
+            receiver: None,
         }
     }
 
@@ -389,6 +422,7 @@ impl Struct {
             name,
             fields: Vec::new(),
             is_repr_c: false,
+            derivations: Vec::new(),
         }
     }
 
@@ -415,6 +449,7 @@ impl<'m> RCL<'m> {
             main_functions: Vec::new(),
             import_statements: Vec::new(),
             constants: Vec::new(),
+            impls: Vec::new(),
         }
     }
 

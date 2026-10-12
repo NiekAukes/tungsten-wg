@@ -394,6 +394,8 @@ impl<'m> PrettyPrint for Expression<'m> {
                 p.push(match op {
                     UnaryOperator::Negate => "-",
                     UnaryOperator::Not => "!",
+                    UnaryOperator::Ref => "&",
+                    UnaryOperator::MutRef => "&mut ",
                 });
                 operand.pretty(p);
             }

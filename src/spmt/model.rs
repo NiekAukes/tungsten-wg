@@ -340,6 +340,8 @@ pub enum BinaryOperator {
 pub enum UnaryOperator {
     Negate,
     Not,
+    Ref,
+    MutRef,
 }
 
 pub struct Interned<'m, T: ?Sized>(&'m T);

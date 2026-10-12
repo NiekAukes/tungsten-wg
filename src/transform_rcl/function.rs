@@ -124,16 +124,16 @@ pub fn convert_density_function<'a, 'm>(
     //     .unwrap_or_else(|| format!("density_function_{}", spmt_df.addr() as usize));
     let density_func_name = derive_density_function_name(spmt_df, dimensions);
     let mut rcl_func = rcl::Function::new(Some(density_func_name.clone()), None);
-
+    let return_type = convert_type(&spmt_df.return_type);
     // Output buffer, plus origin/scale parameters.
     //rcl_func.add_parameter("pos3".to_string(), rcl::Type::Struct("Pos3".to_string()));
     rcl_func.add_parameter(
         "out".to_string(),
-        rcl::Type::MutArrayRef(Box::new(rcl::Type::F64), dimensions.flatten() as usize),
+        rcl::Type::MutArrayRef(Box::new(return_type.clone()), dimensions.flatten() as usize),
     );
     let out_var = Rc::new(rcl::Variable {
         name: Some("out".to_string()),
-        t: rcl::Type::MutArrayRef(Box::new(rcl::Type::F64), dimensions.flatten() as usize),
+        t: rcl::Type::MutArrayRef(Box::new(return_type), dimensions.flatten() as usize),
         mutable: true,
     });
 

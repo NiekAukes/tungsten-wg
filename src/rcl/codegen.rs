@@ -81,6 +81,11 @@ impl RustCodeGenerator {
             p.line("");
         }
 
+        for imp in &icl.impls {
+            self.generate_impl(&mut p, imp);
+            p.line("");
+        }
+
         p.finish()
     }
 
@@ -145,6 +150,11 @@ impl RustCodeGenerator {
             p.line("");
         }
 
+        for imp in &icl.impls {
+            self.generate_impl(&mut p, imp);
+            p.line("");
+        }
+
         p.dedent();
         p.line("}");
 
@@ -155,6 +165,9 @@ impl RustCodeGenerator {
     fn generate_struct(&self, p: &mut Printer, struct_def: &icl::StructRef<'_>) {
         if struct_def.is_repr_c {
             p.line("#[repr(C)]");
+        }
+        if struct_def.derivations.len() > 0 {
+            p.line(&format!("#[derive({})]", struct_def.derivations.join(", ")));
         }
 
         p.push("pub struct ");
@@ -171,6 +184,22 @@ impl RustCodeGenerator {
         }
         p.dedent();
 
+        p.line("}");
+    }
+
+    /// Generate Rust code for an impl block
+    fn generate_impl(&self, p: &mut Printer, imp: &icl::Impl<'_>) {
+        p.push("impl ");
+        p.push(&imp.type_name);
+        p.line(" {");
+        p.indent();
+        for (i, method) in imp.methods.iter().enumerate() {
+            if i > 0 {
+                p.line("");
+            }
+            self.generate_function(p, method, true);
+        }
+        p.dedent();
         p.line("}");
     }
 
@@ -193,8 +222,16 @@ impl RustCodeGenerator {
 
         p.push("(");
 
+        if let Some(receiver) = func.receiver {
+            p.push(match receiver {
+                icl::Receiver::Value => "self",
+                icl::Receiver::Ref => "&self",
+                icl::Receiver::MutRef => "&mut self",
+            });
+        }
+
         for (i, param) in func.parameters.iter().enumerate() {
-            if i > 0 {
+            if i > 0 || func.receiver.is_some() {
                 p.push(", ");
             }
             p.push(&param.name);
@@ -423,6 +460,15 @@ impl RustCodeGenerator {
                 p.line(";");
             }
 
+            icl::Statement::AssignPlace { target, value } => {
+                let target_str = self.expression_to_string_with_printer(p, target);
+                p.push(&target_str);
+                p.push(" = ");
+                let value_str = self.expression_to_string_with_printer(p, value);
+                p.push(&value_str);
+                p.line(";");
+            }
+
             icl::Statement::InlineRust(s) => {
                 p.line(s);
             }
@@ -616,6 +662,8 @@ impl RustCodeGenerator {
             icl::UnaryOperator::Negate => "-",
             icl::UnaryOperator::Not => "!",
             icl::UnaryOperator::BitwiseNot => "~",
+            icl::UnaryOperator::Ref(false) => "&",
+            icl::UnaryOperator::Ref(true) => "&mut ",
         }
     }
 
@@ -635,6 +683,8 @@ impl RustCodeGenerator {
             icl::Type::Bool => "bool".to_string(),
             icl::Type::Void => "()".to_string(),
             icl::Type::Ref(inner) => format!("&{}", self.type_to_rust_string(inner)),
+            icl::Type::MutRef(inner) => format!("&mut {}", self.type_to_rust_string(inner)),
+            icl::Type::Box(inner) => format!("Box<{}>", self.type_to_rust_string(inner)),
             icl::Type::Pointer(inner) => {
                 format!("*const {}", self.type_to_rust_string(inner))
             }

@@ -97,7 +97,9 @@ impl CudaCodeGenerator {
         let var_suffix = self.var_suffix_if_neccesary(&gv.inner.t);
         p.push(" ");
         let name = match &gv.inner.name {
-            crate::spmt::model::Name::Anonymous => sanitize_name(&p.anon_name(gv.inner.clone(), "var")),
+            crate::spmt::model::Name::Anonymous => {
+                sanitize_name(&p.anon_name(gv.inner.clone(), "var"))
+            }
             crate::spmt::model::Name::Prefixed(prefix) => {
                 sanitize_name(&p.anon_name(gv.inner.clone(), &prefix))
             }
@@ -450,7 +452,6 @@ impl CudaCodeGenerator {
                     } else {
                         format!("{}", v)
                     }
-
                 }
             }
             cuda::Expression::BoolLiteral(v) => format!("{}", v),
@@ -566,9 +567,8 @@ impl CudaCodeGenerator {
     fn type_to_string(&self, t: &cuda::Type) -> String {
         match t {
             cuda::Type::Array(inner, n) => format!("{}", self.type_to_string(inner)),
-            _ => format!("{}", t)
+            _ => format!("{}", t),
         }
-        
     }
     fn var_suffix_if_neccesary(&self, t: &cuda::Type) -> String {
         match t {
@@ -614,6 +614,7 @@ impl CudaCodeGenerator {
             cuda::UnaryOperator::Negate => "-",
             cuda::UnaryOperator::Not => "!",
             cuda::UnaryOperator::BitwiseNot => "~",
+            cuda::UnaryOperator::Ref => "&",
         }
     }
 }

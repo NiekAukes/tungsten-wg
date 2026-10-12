@@ -58,6 +58,8 @@ pub fn convert_unary_op(op: spmt::UnaryOperator) -> rcl::UnaryOperator {
     match op {
         spmt::UnaryOperator::Negate => rcl::UnaryOperator::Negate,
         spmt::UnaryOperator::Not => rcl::UnaryOperator::Not,
+        spmt::UnaryOperator::Ref => rcl::UnaryOperator::Ref(false),
+        spmt::UnaryOperator::MutRef => rcl::UnaryOperator::Ref(true),
     }
 }
 

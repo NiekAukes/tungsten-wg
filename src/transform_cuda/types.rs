@@ -61,6 +61,8 @@ pub fn convert_unary_op(op: spmt::UnaryOperator) -> cuda::UnaryOperator {
     match op {
         spmt::UnaryOperator::Negate => cuda::UnaryOperator::Negate,
         spmt::UnaryOperator::Not => cuda::UnaryOperator::Not,
+        spmt::UnaryOperator::Ref => cuda::UnaryOperator::Ref,
+        spmt::UnaryOperator::MutRef => cuda::UnaryOperator::Ref,
     }
 }
 

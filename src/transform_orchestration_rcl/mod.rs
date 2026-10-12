@@ -12,7 +12,7 @@ use crate::{
 
 mod builders;
 mod output;
-mod random;
+pub mod random;
 
 pub struct OrchestrationConverter<'m> {
     rcl_model: RCL<'m>,
@@ -45,6 +45,7 @@ impl<'m> OrchestrationConverter<'m> {
             body: Vec::new(),
             return_type: Some(crate::rcl::model::Type::Void),
             inline: false,
+            receiver: None,
         };
 
         self.rcl_model
@@ -153,6 +154,7 @@ impl<'m> OrchestrationConverter<'m> {
             body: Vec::new(),
             return_type: Some(return_type.clone()),
             inline: false,
+            receiver: None,
         };
 
         func.add_parameter("origin".to_string(), Type::Struct("Vec3".to_string()));

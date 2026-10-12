@@ -175,11 +175,6 @@ impl<'m> Scope<'m> {
     }
 
     fn find_named_var(&self, target: &old::Var<'m>) -> Option<Ref<new::Var>> {
-        println!("Looking for named var: {:?}", target.name);
-        println!("Current vars in scope:");
-        for (ref_var, new_var) in self.vars.iter() {
-            println!("  {:?}: {:?}", ref_var, new_var.name);
-        }
         for (ref_var, new_var) in self.vars.iter() {
             let (Named(name), Named(target_name)) = (&new_var.name, &target.name) else {
                 continue;
@@ -362,7 +357,7 @@ impl<'m> Converter<'m> {
             body,
             variables: vars,
             parameters: vec![], // the position is implicit for density functions
-            return_type: old::VariableType::F64, // density functions return a density (f32)
+            return_type: df.return_type.clone(),
             source_hash: df.source_hash,
         };
         self.program.compute_units[unit_ref] = new::ComputeUnit::DensityFunction {
@@ -869,6 +864,8 @@ fn unary_op(op: old::UnaryOperator) -> new::UnaryOperator {
     match op {
         old::UnaryOperator::Negate => new::UnaryOperator::Negate,
         old::UnaryOperator::Not => new::UnaryOperator::Not,
+        old::UnaryOperator::Ref => new::UnaryOperator::Ref(false),
+        old::UnaryOperator::MutRef => new::UnaryOperator::Ref(true),
     }
 }
 

@@ -196,6 +196,13 @@ impl<'m> Var<'m> {
             right: Box::new(rhs.into()),
         }
     }
+
+    pub fn as_mut_ref(self) -> Expression<'m> {
+        Expression::UnaryOp {
+            op: UnaryOperator::MutRef,
+            operand: Box::new(self.into()),
+        }
+    }
 }
 
 // impl<'m> From<Var<'m>> for Expression<'m> {

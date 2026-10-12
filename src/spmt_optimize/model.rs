@@ -143,6 +143,14 @@ impl<T> Arena<T> {
         Some(v)
     }
 
+    pub fn contains(&self, r: Ref<T>) -> bool {
+        r.tag == self.tag
+            && self
+                .slots
+                .get(r.idx as usize)
+                .is_some_and(|s| s.generation == r.generation && s.value.is_some())
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (Ref<T>, &T)> {
         let tag = self.tag;
         self.slots.iter().enumerate().filter_map(move |(i, s)| {
@@ -190,6 +198,39 @@ impl<T> PartialEq for Arena<T> {
 }
 
 impl<T> Eq for Arena<T> {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
+pub struct Dimensions {
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+    /// Extends the X dimension to provide concurrency over lanes (warps)
+    pub lane: i32,
+    /// Extends the Y dimension to provide concurrency over the block (thread blocks)
+    pub block: i32,
+}
+
+impl Dimensions {
+    pub fn new(x: i32, y: i32, z: i32, lane: i32, block: i32) -> Self {
+        Self {
+            x,
+            y,
+            z,
+            lane,
+            block,
+        }
+    }
+
+    pub fn from_tuple(dimensions: (i32, i32, i32)) -> Self {
+        Self {
+            x: dimensions.0,
+            y: dimensions.1,
+            z: dimensions.2,
+            lane: 1,
+            block: 1,
+        }
+    }
+}
 
 #[derive(PartialEq, Debug, Clone)]
 pub struct EntryPoint {
@@ -469,6 +510,7 @@ pub enum BinaryOperator {
 pub enum UnaryOperator {
     Negate,
     Not,
+    Ref(bool),
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -260,7 +260,12 @@ pub struct CudaFunction<'m> {
 pub type FunctionRef<'m> = Interned<'m, CudaFunction<'m>>;
 
 impl<'m> CudaFunction<'m> {
-    pub fn new(qualifier: FunctionQualifier, name: Option<String>, return_type: Type, source_hash: u64) -> Self {
+    pub fn new(
+        qualifier: FunctionQualifier,
+        name: Option<String>,
+        return_type: Type,
+        source_hash: u64,
+    ) -> Self {
         CudaFunction {
             qualifier,
             name,
@@ -500,6 +505,7 @@ pub enum UnaryOperator {
     Negate,
     Not,
     BitwiseNot,
+    Ref,
 }
 
 // ---------------------------------------------------------------------------

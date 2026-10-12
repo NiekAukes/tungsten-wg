@@ -14,12 +14,14 @@ use bumpalo::Bump;
 use std::collections::HashMap;
 use thiserror::Error;
 
+
 // --- Modules ---
 
 /// CUDA models and code generation utilities.
 pub mod cuda;
 /// Wave orchestration and execution scheduling logic.
 pub mod orchestrate;
+pub mod interface;
 /// Rust Code Language (RCL) models and inline code generation.
 pub mod rcl;
 /// Single Program Multiple Thread (SPMT) Intermediate Representation definitions.
@@ -36,9 +38,11 @@ pub mod transform_orchestration_gpu;
 pub mod transform_orchestration_rcl;
 /// Transformations from SPMT IR to RCL AST.
 pub mod transform_rcl;
+/// Transformations from optimized SPMT to RCL (new uniform-signature format).
+pub mod transform_rcl_new;
 
 use crate::{
-    cuda::{codegen::CudaCodeGenerator, model::CudaModule}, rcl::codegen::RustCodeGenerator, spmt::{normalize::NormalizedSPMT, pretty::Printer}, transform_orchestration_cuda::CudaOrchestrationCodegen, transform_orchestration_gpu::GpuOrchestrationCodegen, transform_orchestration_rcl::OrchestrationConverter
+    cuda::{codegen::CudaCodeGenerator, model::CudaModule}, interface::OrchestrationCodegen, rcl::codegen::RustCodeGenerator, spmt::{normalize::NormalizedSPMT, pretty::Printer}, spmt_optimize::perform_inline, transform_orchestration_cuda::CudaOrchestrationCodegen, transform_orchestration_gpu::GpuOrchestrationCodegen, transform_orchestration_rcl::OrchestrationConverter
 };
 
 use crate::spmt::model::SPMT as Program;
@@ -69,6 +73,8 @@ pub type Result<T> = std::result::Result<T, CompileError>;
 pub struct CompilerConfig {
     /// Whether to generate the Rust (RCL) backend.
     pub generate_rcl: bool,
+    /// Whether to generate Rust from optimized SPMT with the new generator.
+    pub generate_rcl_new: bool,
     /// Whether to generate the generalized GPU orchestrator (currently disabled).
     pub generate_gpu_orchestrator: bool,
     /// Whether to generate the CUDA C++ backend.
@@ -85,6 +91,7 @@ impl Default for CompilerConfig {
     fn default() -> Self {
         Self {
             generate_rcl: true,
+            generate_rcl_new: false,
             generate_gpu_orchestrator: false,
             generate_cuda: false,
             rcl_density_module_name: "density_function".to_string(),
@@ -110,6 +117,12 @@ impl CompilerConfig {
     //     self.generate_gpu_orchestrator = generate;
     //     self
     // }
+
+    /// Toggles the new optimized-SPMT RCL generator.
+    pub fn with_rcl_new(mut self, generate: bool) -> Self {
+        self.generate_rcl_new = generate;
+        self
+    }
 
     /// Toggles the generation of the CUDA C++ backend.
     pub fn with_cuda(mut self, generate: bool) -> Self {
@@ -144,6 +157,8 @@ pub struct CompiledOutput {
     /// The concatenated Rust source code.
     /// Contains both the density function mathematical logic and the wave orchestration logic.
     pub rcl: Option<String>,
+    /// Rust source from the new optimized-SPMT generator (density module followed by orchestration module).
+    pub rcl_new: Option<String>,
     //pub rcl_orchestration: Option<String>,
     //pub gpu_orchestrator: Option<String>,
     /// The generated CUDA device C++ code containing the mathematical density kernels.
@@ -174,7 +189,8 @@ pub fn compile(program: &Program, config: &CompilerConfig) -> Result<CompiledOut
     let orchestration = orchestrate::transform::transform_from_spmt(program, &orchestration_arena);
     let waves = orchestration.arrange_waves();
 
-    let optimize = spmt_optimize::conversion::convert(program).unwrap();
+    let mut optimize = spmt_optimize::conversion::convert(program).unwrap();
+    //perform_inline(&mut optimize); // is slower on a CPU
 
     if config.generate_wave_orchestration_graph {
         let mut printer = Printer::new();
@@ -184,6 +200,19 @@ pub fn compile(program: &Program, config: &CompilerConfig) -> Result<CompiledOut
     }
 
     // 1. Generate Rust
+    if config.generate_rcl_new {
+        let rcl_arena = Bump::new();
+        let device = transform_rcl_new::RCLCodegen::new(&optimize, &rcl_arena);
+        let mut orchestration_codegen = transform_rcl_new::TransformRclOrchestration::new(
+            Box::new(device),
+            &rcl_arena,
+            &config.rcl_density_module_name,
+            &config.rcl_orchestration_module_name,
+        );
+        orchestration_codegen.convert_program(&optimize);
+        output.rcl_new = Some(orchestration_codegen.output());
+    }
+
     if config.generate_rcl {
         let mut orchestration_conv = OrchestrationConverter::new(&orchestration_arena);
         orchestration_conv.convert(&waves, orchestration.get_primary_shaders());
