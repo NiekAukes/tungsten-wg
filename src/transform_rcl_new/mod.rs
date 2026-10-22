@@ -34,8 +34,8 @@ pub mod expression;
 pub mod function;
 pub mod orchestration;
 pub mod statement;
-pub mod types;
 pub mod transformer;
+pub mod types;
 
 use crate::interface::{DeviceCodegen, Instance, Interface};
 
@@ -60,8 +60,42 @@ pub fn uniform_parameters() -> Vec<rcl::Parameter> {
     use rcl::Type;
     let s = |n: &str| Type::Struct(n.to_string());
     vec![
-        rcl::Parameter { name: PARAM_POS.into(), t: s("PositionIterator") },
-        rcl::Parameter { name: PARAM_CONFIG.into(), t: Type::Ref(Box::new(s(CONFIG_STRUCT_NAME))) },
+        rcl::Parameter {
+            name: PARAM_POS.into(),
+            t: s("PositionIterator"),
+        },
+        rcl::Parameter {
+            name: PARAM_CONFIG.into(),
+            t: Type::Ref(Box::new(s(CONFIG_STRUCT_NAME))),
+        },
+        rcl::Parameter {
+            name: PARAM_BUFFERS.into(),
+            t: Type::Ref(Box::new(s(INTERNAL_BUFFERS_STRUCT_NAME))),
+        },
+        rcl::Parameter {
+            name: PARAM_AUTO_CONSTS.into(),
+            t: Type::Ref(Box::new(s(AUTO_CONSTS_STRUCT_NAME))),
+        },
+        rcl::Parameter {
+            name: PARAM_HOST_CONSTS.into(),
+            t: Type::Ref(Box::new(s(HOST_CONSTS_STRUCT_NAME))),
+        },
+    ]
+}
+
+/// The uniform leading parameters of every density and helper function.
+pub fn uniform_kernel_parameters() -> Vec<rcl::Parameter> {
+    use rcl::Type;
+    let s = |n: &str| Type::Struct(n.to_string());
+    vec![
+        rcl::Parameter {
+            name: PARAM_POS.into(),
+            t: s("PositionIterator"),
+        },
+        rcl::Parameter {
+            name: PARAM_CONFIG.into(),
+            t: Type::Ref(Box::new(s(CONFIG_STRUCT_NAME))),
+        },
         rcl::Parameter {
             name: PARAM_BUFFERS.into(),
             t: Type::MutRef(Box::new(s(INTERNAL_BUFFERS_STRUCT_NAME))),
@@ -174,8 +208,11 @@ impl DeviceCodegen for RCLCodegen<'_, '_> {
             return;
         }
         let source = self.source;
-        let ComputeUnit::DensityFunction { helper_functions, constants, .. } =
-            &source.compute_units[cu];
+        let ComputeUnit::DensityFunction {
+            helper_functions,
+            constants,
+            ..
+        } = &source.compute_units[cu];
 
         for dimensions in self.naming.dimensions_of(cu) {
             let converted = function::convert_density(source, &self.naming, cu, dimensions);
@@ -198,7 +235,11 @@ impl DeviceCodegen for RCLCodegen<'_, '_> {
 
     /// One kernel per scheduled instance of the unit.
     fn generate_kernel_of(&mut self, cus: Vec<Ref<ComputeUnit>>) {
-        assert_eq!(cus.len(), 1, "kernels with multiple compute units are not supported yet");
+        assert_eq!(
+            cus.len(),
+            1,
+            "kernels with multiple compute units are not supported yet"
+        );
         for inst in self.naming.instances_of(cus[0]) {
             self.generate_kernel_for_instance(inst);
         }
@@ -218,8 +259,6 @@ impl DeviceCodegen for RCLCodegen<'_, '_> {
     }
 }
 
-
-
 /// Orchestration-side generator; see [`orchestration`] for its [`OrchestrationCodegen`] impl.
 pub struct TransformRclOrchestration<'m> {
     device_codegen: Box<dyn DeviceCodegen + 'm>,
@@ -228,4 +267,3 @@ pub struct TransformRclOrchestration<'m> {
     density_module_name: String,
     orchestration_module_name: String,
 }
-

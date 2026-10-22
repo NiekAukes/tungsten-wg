@@ -18,7 +18,10 @@ use crate::transform_rcl::{InputKey, function};
 pub fn host_consts_variable() -> Rc<rcl::Variable> {
     Rc::new(rcl::Variable {
         name: Some("host_consts".to_string()),
-        t: rcl::Type::Struct(format!("&{}", crate::transform_rcl::HOST_CONSTS_STRUCT_NAME)),
+        t: rcl::Type::Struct(format!(
+            "&{}",
+            crate::transform_rcl::HOST_CONSTS_STRUCT_NAME
+        )),
         mutable: false,
     })
 }
@@ -98,7 +101,6 @@ impl<'a, 'm> RCLFunctionConverter<'m> {
                         }
                         rcl_func
                     };
-
                 let mut arguments = vec![];
                 for param in parameters {
                     arguments.push(self.convert_expression(param));

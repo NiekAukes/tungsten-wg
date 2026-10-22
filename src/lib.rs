@@ -14,14 +14,13 @@ use bumpalo::Bump;
 use std::collections::HashMap;
 use thiserror::Error;
 
-
 // --- Modules ---
 
 /// CUDA models and code generation utilities.
 pub mod cuda;
+pub mod interface;
 /// Wave orchestration and execution scheduling logic.
 pub mod orchestrate;
-pub mod interface;
 /// Rust Code Language (RCL) models and inline code generation.
 pub mod rcl;
 /// Single Program Multiple Thread (SPMT) Intermediate Representation definitions.
@@ -42,7 +41,14 @@ pub mod transform_rcl;
 pub mod transform_rcl_new;
 
 use crate::{
-    cuda::{codegen::CudaCodeGenerator, model::CudaModule}, interface::OrchestrationCodegen, rcl::codegen::RustCodeGenerator, spmt::{normalize::NormalizedSPMT, pretty::Printer}, spmt_optimize::perform_inline, transform_orchestration_cuda::CudaOrchestrationCodegen, transform_orchestration_gpu::GpuOrchestrationCodegen, transform_orchestration_rcl::OrchestrationConverter
+    cuda::{codegen::CudaCodeGenerator, model::CudaModule},
+    interface::OrchestrationCodegen,
+    rcl::codegen::RustCodeGenerator,
+    spmt::{normalize::NormalizedSPMT, pretty::Printer},
+    spmt_optimize::perform_inline,
+    transform_orchestration_cuda::CudaOrchestrationCodegen,
+    transform_orchestration_gpu::GpuOrchestrationCodegen,
+    transform_orchestration_rcl::OrchestrationConverter,
 };
 
 use crate::spmt::model::SPMT as Program;
@@ -190,7 +196,7 @@ pub fn compile(program: &Program, config: &CompilerConfig) -> Result<CompiledOut
     let waves = orchestration.arrange_waves();
 
     let mut optimize = spmt_optimize::conversion::convert(program).unwrap();
-    //perform_inline(&mut optimize); // is slower on a CPU
+    // perform_inline(&mut optimize); // is slower on a CPU
 
     if config.generate_wave_orchestration_graph {
         let mut printer = Printer::new();
@@ -254,11 +260,8 @@ pub fn compile(program: &Program, config: &CompilerConfig) -> Result<CompiledOut
 
         // 3a. CUDA Density Function Module
         // let mut cuda_module = CudaModule::new();
-        let mut cuda_module = transform_cuda::add_waves_to_cuda_module(
-            program,
-            &waves,
-            &cuda_arena,
-        );
+        let mut cuda_module =
+            transform_cuda::add_waves_to_cuda_module(program, &waves, &cuda_arena);
 
         cuda_module.add_include("\"helpers.cu\"".to_string());
 

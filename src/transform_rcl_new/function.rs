@@ -6,15 +6,14 @@ Every density and helper function takes the uniform parameters first (see `unifo
 use std::rc::Rc;
 
 use super::converter::FunctionConverter;
-use super::expression::{const_refs, convert_const_expr, constant_variable};
-use crate::interface::{Instance, Interface};
+use super::expression::{const_refs, constant_variable, convert_const_expr};
 use super::types::convert_type;
-use super::{
-    CONFIG_STRUCT_NAME, uniform_parameters,
-};
+use super::{CONFIG_STRUCT_NAME, uniform_parameters};
+use crate::interface::{Instance, Interface};
 use crate::rcl::model as rcl;
 use crate::spmt::{Name, VariableType};
 use crate::spmt_optimize::model::{ComputeUnit, Constant, Function, OptimizedProgram, Ref};
+use crate::transform_rcl_new::uniform_kernel_parameters;
 
 /// A converted function plus the items it still needs generated.
 pub struct Converted<'m> {
@@ -33,10 +32,7 @@ fn add_uniform_parameters(f: &mut rcl::Function<'_>) {
 }
 
 /// Variables the density-function prologue binds from `p` and `config` instead of declaring bare.
-fn default_binding<'m>(
-    conv: &FunctionConverter<'_>,
-    name: &Name,
-) -> Option<rcl::Expression<'m>> {
+fn default_binding<'m>(conv: &FunctionConverter<'_>, name: &Name) -> Option<rcl::Expression<'m>> {
     let Name::Named(n) = name else { return None };
     let config_field = |f: &str| rcl::Expression::Field {
         base: Box::new(rcl::Expression::Variable(conv.uniform.config.clone())),
@@ -47,9 +43,9 @@ fn default_binding<'m>(
         "origin_scale" => Some(config_field("origin_scale")),
         "position_scale" => Some(config_field("position_scale")),
         // "pos3" => Some(rcl::Expression::Variable(conv.uniform.pos3.clone())),
-        "pos3" => Some(rcl::Expression::Field { 
-            base: Box::new(rcl::Expression::Variable(conv.uniform.it.clone())), 
-            field: "pos".to_string() 
+        "pos3" => Some(rcl::Expression::Field {
+            base: Box::new(rcl::Expression::Variable(conv.uniform.it.clone())),
+            field: "pos".to_string(),
         }),
         _ => None,
     }
@@ -95,7 +91,11 @@ pub fn convert_helper<'a, 'm>(
     out.body.extend(conv.convert_block(&func.body));
     out.inline = true;
 
-    Converted { function: out, called: conv.called, constants: conv.used_constants }
+    Converted {
+        function: out,
+        called: conv.called,
+        constants: conv.used_constants,
+    }
 }
 
 /// Converts a unit's density function for one set of dimensions (named `<name>_d{X}x{Y}x{Z}`).
@@ -108,7 +108,11 @@ pub fn convert_density<'a, 'm>(
     cu: Ref<ComputeUnit>,
     dimensions: (i32, i32, i32),
 ) -> Converted<'m> {
-    let ComputeUnit::DensityFunction { function, density_inputs, .. } = &program.compute_units[cu];
+    let ComputeUnit::DensityFunction {
+        function,
+        density_inputs,
+        ..
+    } = &program.compute_units[cu];
     let func = &program.functions[*function];
     let mut conv = FunctionConverter::new(program, naming, func, Some(density_inputs));
     let mut out = rcl::Function::new(
@@ -138,7 +142,11 @@ pub fn convert_density<'a, 'm>(
     out.body.extend(conv.convert_block(&func.body));
     out.inline = true;
 
-    Converted { function: out, called: conv.called, constants: conv.used_constants }
+    Converted {
+        function: out,
+        called: conv.called,
+        constants: conv.used_constants,
+    }
 }
 
 /// Converts a module-level constant; also returns the constants its initializer references.
@@ -172,9 +180,13 @@ pub fn build_kernel<'m>(
     let return_type = convert_type(&program.functions[*function].return_type);
 
     let var = |name: &str, t: rcl::Type| {
-        Rc::new(rcl::Variable { name: Some(name.to_string()), t, mutable: false })
+        Rc::new(rcl::Variable {
+            name: Some(name.to_string()),
+            t,
+            mutable: false,
+        })
     };
-    let uniform = uniform_parameters();
+    let uniform = uniform_kernel_parameters();
     let (buffers_p, auto_p, host_p) = (&uniform[2], &uniform[3], &uniform[4]);
     let vec3 = || rcl::Type::Struct("Vec3".to_string());
 
@@ -206,10 +218,17 @@ pub fn build_kernel<'m>(
             fields: vec![
                 ("origin".to_string(), E::Variable(origin.clone())),
                 ("origin_scale".to_string(), vec3_new(inst.scaled_origin())),
-                ("position_scale".to_string(), vec3_new(inst.scaled_position())),
+                (
+                    "position_scale".to_string(),
+                    vec3_new(inst.scaled_position()),
+                ),
                 (
                     "dimensions".to_string(),
-                    E::TupleInit(vec![E::I32Literal(dx), E::I32Literal(dy), E::I32Literal(dz)]),
+                    E::TupleInit(vec![
+                        E::I32Literal(dx),
+                        E::I32Literal(dy),
+                        E::I32Literal(dz),
+                    ]),
                 ),
             ],
         }),
@@ -261,7 +280,11 @@ pub fn build_kernel<'m>(
             //     }),
             //     mutable: false,
             // },
-            S::Declare { variable: result, init: Some(call), mutable: false },
+            S::Declare {
+                variable: result,
+                init: Some(call),
+                mutable: false,
+            },
             store,
         ],
     });

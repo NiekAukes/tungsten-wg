@@ -1,3 +1,5 @@
+use std::slice::Iter;
+
 use crate::spmt::builder::Builder;
 pub use crate::spmt::builder::SPMTBuilder;
 use crate::spmt::model::*;
@@ -201,6 +203,17 @@ impl<'m> Var<'m> {
         Expression::UnaryOp {
             op: UnaryOperator::MutRef,
             operand: Box::new(self.into()),
+        }
+    }
+}
+
+impl<'a, 'm> FunctionRef<'m> {
+    pub fn call(self, args: impl IntoIterator<Item = Expression<'m>>) -> Expression<'m> {
+        let mut parameters = vec![];
+        parameters.extend(args.into_iter());
+        Expression::FunctionCall {
+            function: self,
+            parameters,
         }
     }
 }
