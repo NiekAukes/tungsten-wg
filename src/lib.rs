@@ -33,15 +33,16 @@ pub enum CompileError {
     },
 }
 
-/// Builds the shared [`Interface`] once, then runs each backend in order.
+/// Compiles an optimized program with the given backends.
 ///
+/// Each backend receives the same shared [`Interface`] built from the program and its naming rules.
 /// Stops at the first failing backend. Backends that already ran keep their output.
 pub fn compile(
     program: &OptimizedProgram,
     backends: &mut [&mut dyn Backend],
 ) -> Result<(), CompileError> {
-    let interface = Interface::build(program);
     for backend in backends.iter_mut() {
+        let interface = Interface::build(program, backend.naming_rules());
         backend
             .generate(program, &interface)
             .map_err(|source| CompileError::Backend {

@@ -854,6 +854,7 @@ fn binary_op(op: old::BinaryOperator) -> new::BinaryOperator {
         O::Or => N::Or,
         O::ShiftLeft => N::ShiftLeft,
         O::ShiftRight => N::ShiftRight,
+        O::LogicalShiftRight => N::LogicalShiftRight,
         O::BitOr => N::BitOr,
         O::BitAnd => N::BitAnd,
         O::BitXor => N::BitXor,

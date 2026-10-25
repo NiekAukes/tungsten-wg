@@ -18,6 +18,8 @@ pub use scale::Scale;
 
 use naming::{auto_const_field_name, host_field_name, sanitize_name, unique, unit_base_name};
 
+use crate::naming::NamingRules;
+
 /// One scheduled use of a compute unit: its own buffer is keyed by (unit, dimensions, scales).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Instance {
@@ -90,6 +92,10 @@ pub trait DeviceCodegen {
     fn codegen_language(&self) -> &str;
     /// Everything generated so far as source text, wrapped in `module_name` and importing `imports`.
     fn render(&self, module_name: &str, imports: &[String]) -> String;
+    /// Non-fatal diagnostics about the generated code (e.g. oversized methods).
+    fn warnings(&self) -> Vec<String> {
+        vec![]
+    }
 }
 
 /// Decides what the device codegen generates and produces the glue that runs it.
@@ -112,6 +118,8 @@ pub trait Backend {
         program: &OptimizedProgram,
         interface: &Interface,
     ) -> Result<(), BackendError>;
+
+    fn naming_rules(&self) -> &NamingRules;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -136,7 +144,8 @@ pub struct Interface {
 }
 
 impl Interface {
-    pub fn build(program: &OptimizedProgram) -> Self {
+    /// Fixes every name with `rules`; reserved names are never produced.
+    pub fn build(program: &OptimizedProgram, rules: &NamingRules) -> Self {
         let (instances, dependencies) = discover_instances(program);
         let waves = arrange_waves(&instances, dependencies.clone());
 
@@ -151,7 +160,13 @@ impl Interface {
             let key = (inst.cu, inst.dimensions);
             if !density_fns.contains_key(&key) {
                 let (x, y, z) = inst.dimensions;
-                let base = format!("{}_d{}x{}x{}", unit_base_name(program, inst.cu), x, y, z);
+                let base = format!(
+                    "{}_d{}x{}x{}",
+                    unit_base_name(rules, program, inst.cu),
+                    x,
+                    y,
+                    z
+                );
                 density_fns.insert(key, unique(&mut used, base));
             }
             let base = density_fns[&key].clone();
@@ -188,14 +203,14 @@ impl Interface {
         let mut auto_consts = HashMap::new();
         let mut used_auto = HashSet::new();
         for (r, t) in program.permutation_tables.iter() {
-            auto_consts.insert(r, unique(&mut used_auto, auto_const_field_name(t)));
+            auto_consts.insert(r, unique(&mut used_auto, auto_const_field_name(rules, t)));
         }
 
         let mut host_fields = HashMap::new();
         let mut used_host = HashSet::new();
         for (r, h) in program.host_inputs.iter() {
             if matches!(h, HostInput::Static { .. }) {
-                host_fields.insert(r, unique(&mut used_host, host_field_name(h)));
+                host_fields.insert(r, unique(&mut used_host, host_field_name(rules, h)));
             }
         }
 

@@ -288,6 +288,7 @@ impl<'m> PrettyPrint for Expression<'m> {
                     BinaryOperator::Or => " || ",
                     BinaryOperator::ShiftLeft => " << ",
                     BinaryOperator::ShiftRight => " >> ",
+                    BinaryOperator::LogicalShiftRight => " >>> ",
                     BinaryOperator::BitOr => " | ",
                     BinaryOperator::BitAnd => " & ",
                     BinaryOperator::BitXor => " ^ ",

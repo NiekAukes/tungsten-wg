@@ -64,6 +64,7 @@ pub fn convert_binary_op(op: opt::BinaryOperator) -> rcl::BinaryOperator {
         S::Or => D::Or,
         S::ShiftLeft => D::LeftShift,
         S::ShiftRight => D::RightShift,
+        S::LogicalShiftRight => D::RightShift,
         S::BitOr => D::BitwiseOr,
         S::BitAnd => D::BitwiseAnd,
         S::BitXor => D::BitwiseXor,

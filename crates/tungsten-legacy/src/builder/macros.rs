@@ -109,6 +109,14 @@ impl<'m> Expression<'m> {
         }
     }
 
+    pub fn ushr(self, rhs: impl Into<Expression<'m>>) -> Expression<'m> {
+        Expression::BinaryOp {
+            op: BinaryOperator::LogicalShiftRight,
+            left: Box::new(self),
+            right: Box::new(rhs.into()),
+        }
+    }
+
     pub fn bitor(self, rhs: impl Into<Expression<'m>>) -> Expression<'m> {
         Expression::BinaryOp {
             op: BinaryOperator::BitOr,
@@ -167,6 +175,13 @@ impl<'m> Var<'m> {
     pub fn shr(self, rhs: impl Into<Expression<'m>>) -> Expression<'m> {
         Expression::BinaryOp {
             op: BinaryOperator::ShiftRight,
+            left: Box::new(self.into()),
+            right: Box::new(rhs.into()),
+        }
+    }
+    pub fn ushr(self, rhs: impl Into<Expression<'m>>) -> Expression<'m> {
+        Expression::BinaryOp {
+            op: BinaryOperator::LogicalShiftRight,
             left: Box::new(self.into()),
             right: Box::new(rhs.into()),
         }

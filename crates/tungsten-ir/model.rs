@@ -564,6 +564,8 @@ pub enum BinaryOperator {
     Or,
     ShiftLeft,
     ShiftRight,
+    /// Unsigned (logical) right shift: `>>>` in Java. Last, so existing discriminants (and source hashes) stay stable.
+    LogicalShiftRight,
     BitOr,
     BitAnd,
     BitXor,

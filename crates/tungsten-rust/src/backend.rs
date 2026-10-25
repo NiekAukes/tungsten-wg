@@ -1,8 +1,9 @@
+use tungsten_interface::naming::NamingRules;
 use tungsten_interface::{Backend, BackendError, Interface, OrchestrationCodegen};
 use tungsten_ir::model::OptimizedProgram;
 
-use crate::TransformRclOrchestration;
 use crate::RCLCodegen;
+use crate::TransformRclOrchestration;
 
 /// Module names for the generated Rust code. The two modules import each other.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,11 +37,16 @@ pub struct RustOutput {
 pub struct RustBackend {
     config: RustConfig,
     output: Option<RustOutput>,
+    naming_rules: NamingRules,
 }
 
 impl RustBackend {
     pub fn new(config: RustConfig) -> Self {
-        Self { config, output: None }
+        Self {
+            config,
+            output: None,
+            naming_rules: NamingRules::rust(),
+        }
     }
 
     /// The generated code, or `None` before a successful [`Backend::generate`].
@@ -73,7 +79,15 @@ impl Backend for RustBackend {
         let density_module = orchestration.density_module();
         let orchestration_module = orchestration.orchestration_module();
         let full_source = format!("{}\n\n{}", density_module, orchestration_module);
-        self.output = Some(RustOutput { density_module, orchestration_module, full_source });
+        self.output = Some(RustOutput {
+            density_module,
+            orchestration_module,
+            full_source,
+        });
         Ok(())
+    }
+
+    fn naming_rules(&self) -> &NamingRules {
+        &self.naming_rules
     }
 }

@@ -16,7 +16,7 @@ use crate::interned::Interned;
 use crate::model as rcl;
 use crate::model::codegen::RustCodeGenerator;
 use crate::random::xoroshiro_seed;
-use tungsten_interface::naming::{unique, unit_base_name};
+use tungsten_interface::naming::{NamingRules, unique, unit_base_name};
 use tungsten_interface::{DeviceCodegen, Instance, Interface, OrchestrationCodegen};
 use tungsten_ir::model::{
     ComputeUnit, HostInput, OptimizedProgram, PermutationTableInput, Ref, VariableType,
@@ -42,13 +42,20 @@ pub struct AutoConstSpec {
 }
 
 /// Specs derived from the program's permutation tables.
-pub fn permutation_table_specs(program: &OptimizedProgram, interface: &Interface) -> Vec<AutoConstSpec> {
+pub fn permutation_table_specs(
+    program: &OptimizedProgram,
+    interface: &Interface,
+) -> Vec<AutoConstSpec> {
     program
         .permutation_tables
         .iter()
         .map(|(r, table)| {
             let (initializer, args) = match table {
-                PermutationTableInput::PerlinNoise { ident, subident, subident_index } => {
+                PermutationTableInput::PerlinNoise {
+                    ident,
+                    subident,
+                    subident_index,
+                } => {
                     let id = xoroshiro_seed(ident);
                     let sub = subident.as_deref().map(xoroshiro_seed).unwrap_or((0, 0));
                     (
@@ -133,25 +140,35 @@ fn orchestration_struct() -> rcl::Struct {
     let mut s = rcl::Struct::new(ORCHESTRATION_STRUCT_NAME.to_string());
     s.add_field(
         "buffers".to_string(),
-        rcl::Type::Box(Box::new(rcl::Type::Struct(INTERNAL_BUFFERS_STRUCT_NAME.to_string()))),
+        rcl::Type::Box(Box::new(rcl::Type::Struct(
+            INTERNAL_BUFFERS_STRUCT_NAME.to_string(),
+        ))),
     );
     s.add_field(
         "auto_constants".to_string(),
-        rcl::Type::Box(Box::new(rcl::Type::Struct(AUTO_CONSTS_STRUCT_NAME.to_string()))),
+        rcl::Type::Box(Box::new(rcl::Type::Struct(
+            AUTO_CONSTS_STRUCT_NAME.to_string(),
+        ))),
     );
     s.derivations.push("Clone".to_string());
     s
 }
 
 fn var(name: &str, t: rcl::Type) -> Rc<rcl::Variable> {
-    Rc::new(rcl::Variable { name: Some(name.to_string()), t, mutable: false })
+    Rc::new(rcl::Variable {
+        name: Some(name.to_string()),
+        t,
+        mutable: false,
+    })
 }
 
 /// `fn make_auto_consts(seed, &mut AutoConsts)`: assigns every field from its spec's initializer.
 fn make_auto_consts_fn<'m>(specs: &[AutoConstSpec]) -> rcl::Function<'m> {
     use rcl::Expression as E;
     let mut f = rcl::Function::new(Some("make_auto_consts".to_string()), None);
-    let target_type = rcl::Type::MutRef(Box::new(rcl::Type::Struct(AUTO_CONSTS_STRUCT_NAME.to_string())));
+    let target_type = rcl::Type::MutRef(Box::new(rcl::Type::Struct(
+        AUTO_CONSTS_STRUCT_NAME.to_string(),
+    )));
     f.add_parameter("seed".to_string(), rcl::Type::I64);
     f.add_parameter("auto_consts".to_string(), target_type.clone());
     let seed = var("seed", rcl::Type::I64);
@@ -222,7 +239,10 @@ fn new_fn<'m>() -> rcl::Function<'m> {
             function_name: "make_auto_consts".to_string(),
             argument_types: vec![rcl::Type::I64],
             return_type: rcl::Type::Void,
-            arguments: vec![E::Variable(seed), E::MutRef(Box::new(E::Variable(auto_constants.clone())))],
+            arguments: vec![
+                E::Variable(seed),
+                E::MutRef(Box::new(E::Variable(auto_constants.clone()))),
+            ],
         }),
         mutable: false,
     });
@@ -247,7 +267,9 @@ fn entry_method<'m>(
     use rcl::Expression as E;
     use rcl::Statement as S;
     let vec3 = rcl::Type::Struct("Vec3".to_string());
-    let host_consts_t = rcl::Type::Ref(Box::new(rcl::Type::Struct(HOST_CONSTS_STRUCT_NAME.to_string())));
+    let host_consts_t = rcl::Type::Ref(Box::new(rcl::Type::Struct(
+        HOST_CONSTS_STRUCT_NAME.to_string(),
+    )));
     let element = convert_type(unit_return_type(program, entry.cu));
 
     let single = flat_len(entry) == 1;
@@ -294,7 +316,10 @@ fn entry_method<'m>(
         field: interface.buffer_field(entry).to_string(),
     };
     f.add_statement(S::Return(Some(if single {
-        E::Index { base: Box::new(buffer), index: Box::new(E::I32Literal(0)) }
+        E::Index {
+            base: Box::new(buffer),
+            index: Box::new(E::I32Literal(0)),
+        }
     } else {
         E::Ref(Box::new(buffer))
     })));
@@ -337,7 +362,8 @@ impl<'m> TransformRclOrchestration<'m> {
 
     /// The orchestration module source, importing the density module. Call after `convert_program`.
     pub fn orchestration_module(&self) -> String {
-        RustCodeGenerator::new().generate_inline_module(&self.model, &self.orchestration_module_name)
+        RustCodeGenerator::new()
+            .generate_inline_module(&self.model, &self.orchestration_module_name)
     }
 }
 
@@ -346,6 +372,7 @@ impl<'a, 'm> OrchestrationCodegen<'a> for TransformRclOrchestration<'m> {
     /// Calling it again replaces the orchestration model. `interface` must be the one the
     /// device codegen was built with.
     fn convert_program(&mut self, program: &'a OptimizedProgram, interface: &Interface) {
+        let naming = NamingRules::rust();
         // Device code first: one kernel per scheduled instance (repeats are no-ops).
         for wave in interface.waves() {
             for inst in wave {
@@ -354,7 +381,8 @@ impl<'a, 'm> OrchestrationCodegen<'a> for TransformRclOrchestration<'m> {
         }
 
         self.model = rcl::RCL::new();
-        self.model.add_import(format!("super::{}::*", self.density_module_name));
+        self.model
+            .add_import(format!("super::{}::*", self.density_module_name));
 
         let specs = permutation_table_specs(program, interface);
         for s in [
@@ -376,12 +404,15 @@ impl<'a, 'm> OrchestrationCodegen<'a> for TransformRclOrchestration<'m> {
             let entry = Instance::from_entry(entry);
             let name = unique(
                 &mut used,
-                format!("orchestrate_{}", unit_base_name(program, entry.cu)),
+                format!("orchestrate_{}", unit_base_name(&naming, program, entry.cu)),
             );
             let method = entry_method(program, interface, name, &entry);
             methods.push(self.intern(method));
         }
-        self.model.impls.push(rcl::Impl { type_name: ORCHESTRATION_STRUCT_NAME.to_string(), methods });
+        self.model.impls.push(rcl::Impl {
+            type_name: ORCHESTRATION_STRUCT_NAME.to_string(),
+            methods,
+        });
     }
 
     /// Density module followed by the orchestration module.
@@ -389,4 +420,3 @@ impl<'a, 'm> OrchestrationCodegen<'a> for TransformRclOrchestration<'m> {
         self.density_module() + "\n\n" + &self.orchestration_module()
     }
 }
-
