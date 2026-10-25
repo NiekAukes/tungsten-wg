@@ -4,6 +4,8 @@ pub mod model;
 pub mod normalize;
 pub mod pretty;
 
+pub mod conversion;
+
 pub use model::*;
 
 pub fn try_derive_type<'a>(expr: &model::Expression<'a>) -> Option<model::VariableType> {
