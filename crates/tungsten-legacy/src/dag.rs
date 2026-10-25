@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::fmt::Write;
 
 use crate::spmt::{
     model::{Addr, DensityFunctionRef},

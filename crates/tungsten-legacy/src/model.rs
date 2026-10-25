@@ -9,8 +9,61 @@ without having to write separate code for each target.
 use std::{
     fmt::Debug,
     hash::{Hash, Hasher},
-    rc::Rc,
 };
+
+pub use tungsten_codegen::Addr;
+pub use tungsten_ir::{Name, VariableType};
+
+pub struct Interned<'m, T: ?Sized>(&'m T);
+
+impl<'m, T> PartialEq for Interned<'m, T> {
+    fn eq(&self, other: &Self) -> bool {
+        // pointer equality is sufficient since we intern all functions
+        std::ptr::eq(self.0, other.0)
+    }
+}
+
+impl<'m, T> Eq for Interned<'m, T> {}
+
+impl<'m, T> Hash for Interned<'m, T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // pointer hash is sufficient since we intern all functions
+        std::ptr::hash(self.0, state);
+    }
+}
+
+impl<'m, T> std::ops::Deref for Interned<'m, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
+
+impl<'m, T> Debug for Interned<'m, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Interned({:p})", self.0)
+    }
+}
+
+impl<'m, T> Clone for Interned<'m, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<'m, T> Copy for Interned<'m, T> {}
+
+impl<'m, T> Interned<'m, T> {
+    pub fn new(value: &'m T) -> Self {
+        Interned(value)
+    }
+}
+
+impl<T> Addr for Interned<'_, T> {
+    fn addr(&self) -> *const () {
+        self.0 as *const T as *const ()
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct MainDensityFunction<'m> {
@@ -150,71 +203,6 @@ pub struct Variable {
     pub t: VariableType,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Name {
-    Anonymous,        // for variables that don't have a name (e.g. temporary variables)
-    Prefixed(String), // for variables that have a name, but it's not guaranteed to be unique
-    Named(String),    // for variables that have a unique name
-}
-
-impl Ord for Name {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        use Name::*;
-        match (self, other) {
-            (Anonymous, Anonymous) => std::cmp::Ordering::Equal,
-            (Anonymous, _) => std::cmp::Ordering::Less,
-            (_, Anonymous) => std::cmp::Ordering::Greater,
-            (Prefixed(s1), Prefixed(s2)) => s1.cmp(s2),
-            (Prefixed(_), Named(_)) => std::cmp::Ordering::Less,
-            (Named(_), Prefixed(_)) => std::cmp::Ordering::Greater,
-            (Named(s1), Named(s2)) => s1.cmp(s2),
-        }
-    }
-}
-
-impl PartialOrd for Name {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub enum VariableType {
-    DensityInput,
-    PermutationTable,
-    InterpolatedNoiseSampler,
-    Vec3,
-    Pos3,
-    F32,
-    F64,
-    I32,
-    I64,
-    Bool,
-    Array(Box<VariableType>, usize), // For array types, we can specify the element type and size
-    Extern(&'static str), // For external functions, we can use the name of the function as the type
-}
-
-impl Debug for VariableType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            VariableType::DensityInput => write!(f, "density"),
-            VariableType::PermutationTable => write!(f, "perm_table"),
-            VariableType::InterpolatedNoiseSampler => write!(f, "interpolated_noise_sampler"),
-            VariableType::Vec3 => write!(f, "vec3"),
-            VariableType::Pos3 => write!(f, "pos3"),
-            VariableType::F32 => write!(f, "f32"),
-            VariableType::F64 => write!(f, "f64"),
-            VariableType::I32 => write!(f, "i32"),
-            VariableType::I64 => write!(f, "i64"),
-            VariableType::Extern(name) => write!(f, "{}", name),
-            VariableType::Array(element_type, size) => {
-                write!(f, "array[{:?}; {}]", element_type, size)
-            }
-            VariableType::Bool => write!(f, "bool"),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement<'m> {
     Assign {
@@ -344,51 +332,6 @@ pub enum UnaryOperator {
     MutRef,
 }
 
-pub struct Interned<'m, T: ?Sized>(&'m T);
-
-impl<'m, T> PartialEq for Interned<'m, T> {
-    fn eq(&self, other: &Self) -> bool {
-        // pointer equality is sufficient since we intern all functions
-        std::ptr::eq(self.0, other.0)
-    }
-}
-
-impl<'m, T> Eq for Interned<'m, T> {}
-
-impl<'m, T> Hash for Interned<'m, T> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        // pointer hash is sufficient since we intern all functions
-        std::ptr::hash(self.0, state);
-    }
-}
-
-impl<'m, T> std::ops::Deref for Interned<'m, T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        self.0
-    }
-}
-
-impl<'m, T> Debug for Interned<'m, T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Interned({:p})", self.0)
-    }
-}
-
-impl<'m, T> Clone for Interned<'m, T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-impl<'m, T> Copy for Interned<'m, T> {}
-
-impl<'m, T> Interned<'m, T> {
-    pub fn new(value: &'m T) -> Self {
-        Interned(value)
-    }
-}
-
 impl<'m> Function<'m> {
     pub fn add_statement(&mut self, statement: Statement<'m>) {
         self.body.push(statement);
@@ -396,29 +339,6 @@ impl<'m> Function<'m> {
 
     pub fn add_variable(&mut self, variable: Var<'m>) {
         self.variables.push(variable);
-    }
-}
-
-pub trait Addr {
-    fn addr(&self) -> *const ();
-}
-
-impl<T> Addr for &T {
-    fn addr(&self) -> *const () {
-        *self as *const T as *const ()
-    }
-}
-
-impl<T> Addr for std::rc::Rc<T> {
-    fn addr(&self) -> *const () {
-        let ptr: *const T = Rc::as_ptr(self);
-        ptr as *const ()
-    }
-}
-
-impl<T> Addr for Interned<'_, T> {
-    fn addr(&self) -> *const () {
-        self.0 as *const T as *const ()
     }
 }
 

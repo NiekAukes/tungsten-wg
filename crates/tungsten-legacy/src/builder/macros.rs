@@ -1,6 +1,3 @@
-use std::slice::Iter;
-
-use crate::spmt::builder::Builder;
 pub use crate::spmt::builder::SPMTBuilder;
 use crate::spmt::model::*;
 
@@ -421,23 +418,4 @@ macro_rules! pos3 {
 #[macro_export]
 macro_rules! array {
     ($($e:expr),* $(,)?) => { Expression::ArrayLiteral(vec![$(($e).into()),*]) };
-}
-
-fn test() {
-    let arena = bumpalo::Bump::new();
-    let mut b = Builder::new(&arena);
-    vars!(b; x: F32, y: F32, acc: F32);
-    let x = 0.0f32;
-
-    build!(b, {
-        acc = 0.0f32;
-        repeat (4) {
-            acc = acc + sin(x * 2.0f32) * y;
-        }
-        if (acc.gt(x)) {
-            return 1.0f32;
-        } else {
-            return -acc;
-        }
-    });
 }

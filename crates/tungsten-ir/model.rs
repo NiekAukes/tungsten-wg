@@ -5,7 +5,70 @@ use std::{
     sync::atomic::{AtomicU32, Ordering},
 };
 
-use crate::spmt::{Name, VariableType};
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Name {
+    Anonymous,        // for variables that don't have a name (e.g. temporary variables)
+    Prefixed(String), // for variables that have a name, but it's not guaranteed to be unique
+    Named(String),    // for variables that have a unique name
+}
+
+impl Ord for Name {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use Name::*;
+        match (self, other) {
+            (Anonymous, Anonymous) => std::cmp::Ordering::Equal,
+            (Anonymous, _) => std::cmp::Ordering::Less,
+            (_, Anonymous) => std::cmp::Ordering::Greater,
+            (Prefixed(s1), Prefixed(s2)) => s1.cmp(s2),
+            (Prefixed(_), Named(_)) => std::cmp::Ordering::Less,
+            (Named(_), Prefixed(_)) => std::cmp::Ordering::Greater,
+            (Named(s1), Named(s2)) => s1.cmp(s2),
+        }
+    }
+}
+
+impl PartialOrd for Name {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum VariableType {
+    DensityInput,
+    PermutationTable,
+    InterpolatedNoiseSampler,
+    Vec3,
+    Pos3,
+    F32,
+    F64,
+    I32,
+    I64,
+    Bool,
+    Array(Box<VariableType>, usize), // For array types, we can specify the element type and size
+    Extern(&'static str), // For external functions, we can use the name of the function as the type
+}
+
+impl Debug for VariableType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VariableType::DensityInput => write!(f, "density"),
+            VariableType::PermutationTable => write!(f, "perm_table"),
+            VariableType::InterpolatedNoiseSampler => write!(f, "interpolated_noise_sampler"),
+            VariableType::Vec3 => write!(f, "vec3"),
+            VariableType::Pos3 => write!(f, "pos3"),
+            VariableType::F32 => write!(f, "f32"),
+            VariableType::F64 => write!(f, "f64"),
+            VariableType::I32 => write!(f, "i32"),
+            VariableType::I64 => write!(f, "i64"),
+            VariableType::Extern(name) => write!(f, "{}", name),
+            VariableType::Array(element_type, size) => {
+                write!(f, "array[{:?}; {}]", element_type, size)
+            }
+            VariableType::Bool => write!(f, "bool"),
+        }
+    }
+}
 
 static NEXT_TAG: AtomicU32 = AtomicU32::new(1);
 
@@ -192,7 +255,7 @@ impl<T: Debug> Debug for Arena<T> {
 }
 
 impl<T> PartialEq for Arena<T> {
-    fn eq(&self, other: &Self) -> bool {
+    fn eq(&self, _other: &Self) -> bool {
         false // Arenas are never considered equal, even if their contents are the same.
     }
 }

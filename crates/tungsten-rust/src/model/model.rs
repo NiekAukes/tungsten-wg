@@ -10,13 +10,9 @@ The idea is to have a flexible intermediate representation that captures:
 - Type information (primitives, pointers, structs)
 */
 
-use std::{
-    fmt::Debug,
-    hash::{Hash, Hasher},
-    rc::Rc,
-};
+use std::{fmt::Debug, hash::Hash, rc::Rc};
 
-use crate::spmt::model::Interned;
+use crate::interned::Interned;
 
 /// Root structure containing all functions and definitions
 #[derive(Debug, Clone)]

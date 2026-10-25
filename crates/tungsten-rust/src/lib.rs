@@ -23,21 +23,26 @@
 //! loop item and a `Pos3`, `make_boxed::<T>()`, `make_permutation_table`, `make_base3d_perm_table`,
 //! and the sampler types.
 
-use crate::rcl::codegen::RustCodeGenerator;
-use crate::rcl::model as rcl;
-use crate::spmt::model::Interned;
-use crate::spmt_optimize::model::{ComputeUnit, Constant, Function, OptimizedProgram, Ref};
 use std::collections::HashSet;
 
+use tungsten_interface::{DeviceCodegen, Instance, Interface};
+use tungsten_ir::model::{ComputeUnit, Constant, Function, OptimizedProgram, Ref};
+
+use crate::interned::Interned;
+use crate::model as rcl;
+use crate::model::codegen::RustCodeGenerator;
+
+pub mod backend;
 pub mod converter;
 pub mod expression;
 pub mod function;
+pub mod interned;
+pub mod model;
 pub mod orchestration;
+pub mod random;
 pub mod statement;
 pub mod transformer;
 pub mod types;
-
-use crate::interface::{DeviceCodegen, Instance, Interface};
 
 /// Names of runtime items and generated structs that the generated code refers to by name.
 pub const PERLIN_NOISE_SAMPLER_STRUCT_NAME: &str = "PerlinNoiseSampler";
@@ -118,7 +123,7 @@ pub fn uniform_kernel_parameters() -> Vec<rcl::Parameter> {
 pub struct RCLCodegen<'a, 'm> {
     source: &'a OptimizedProgram,
     /// Names and schedule shared with the orchestration side.
-    naming: Interface,
+    naming: &'a Interface,
     model: rcl::RCL<'m>,
     arena: &'m bumpalo::Bump,
     done_units: HashSet<Ref<ComputeUnit>>,
@@ -128,11 +133,15 @@ pub struct RCLCodegen<'a, 'm> {
 } // TODO add config parameters (if necessary)
 
 impl<'a, 'm> RCLCodegen<'a, 'm> {
-    /// Builds the [`Interface`] for `source`; nothing is generated until asked.
-    pub fn new(source: &'a OptimizedProgram, arena: &'m bumpalo::Bump) -> Self {
+    /// `interface` must be the one built for `source`; nothing is generated until asked.
+    pub fn new(
+        source: &'a OptimizedProgram,
+        arena: &'m bumpalo::Bump,
+        interface: &'a Interface,
+    ) -> Self {
         Self {
             source,
-            naming: Interface::build(source),
+            naming: interface,
             model: rcl::RCL::new(),
             arena,
             done_units: HashSet::new(),
@@ -142,8 +151,8 @@ impl<'a, 'm> RCLCodegen<'a, 'm> {
         }
     }
 
-    pub fn naming(&self) -> &Interface {
-        &self.naming
+    pub fn naming(&self) -> &'a Interface {
+        self.naming
     }
 
     /// The RCL model generated so far.

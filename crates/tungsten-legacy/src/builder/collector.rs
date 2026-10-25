@@ -105,7 +105,7 @@ impl<'m> Collector<'m> {
                     self.expr(i);
                 }
             }
-            E::ExplicitCast { to, expr } => {
+            E::ExplicitCast { to: _, expr } => {
                 self.expr(expr);
             }
         }

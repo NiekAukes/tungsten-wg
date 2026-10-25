@@ -6,14 +6,17 @@ host inputs and auto consts. Computed once so callers and callees agree.
 
 use std::collections::{HashMap, HashSet};
 
-use crate::spmt_optimize::model::{
+use tungsten_ir::model::{
     ComputeUnit, Constant, DensityInput, EntryPoint, Function, HostInput, OptimizedProgram,
     PermutationTableInput, Ref,
 };
 
 pub mod naming;
+pub mod scale;
 
-use naming::{auto_const_field_name, host_field_name, unique, unit_base_name};
+pub use scale::Scale;
+
+use naming::{auto_const_field_name, host_field_name, sanitize_name, unique, unit_base_name};
 
 /// One scheduled use of a compute unit: its own buffer is keyed by (unit, dimensions, scales).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -29,7 +32,11 @@ fn bits(v: (f64, f64, f64)) -> [u64; 3] {
 }
 
 fn unbits(b: [u64; 3]) -> (f64, f64, f64) {
-    (f64::from_bits(b[0]), f64::from_bits(b[1]), f64::from_bits(b[2]))
+    (
+        f64::from_bits(b[0]),
+        f64::from_bits(b[1]),
+        f64::from_bits(b[2]),
+    )
 }
 
 impl Instance {
@@ -39,15 +46,30 @@ impl Instance {
         scaled_origin: (f64, f64, f64),
         scaled_position: (f64, f64, f64),
     ) -> Self {
-        Self { cu, dimensions, origin_bits: bits(scaled_origin), position_bits: bits(scaled_position) }
+        Self {
+            cu,
+            dimensions,
+            origin_bits: bits(scaled_origin),
+            position_bits: bits(scaled_position),
+        }
     }
 
     pub fn from_entry(e: &EntryPoint) -> Self {
-        Self::new(e.density_function, e.dimensions, e.scaled_origin, e.scaled_position)
+        Self::new(
+            e.density_function,
+            e.dimensions,
+            e.scaled_origin,
+            e.scaled_position,
+        )
     }
 
     pub fn from_input(di: &DensityInput) -> Self {
-        Self::new(di.density_function, di.dimensions, di.scaled_origin, di.scaled_position)
+        Self::new(
+            di.density_function,
+            di.dimensions,
+            di.scaled_origin,
+            di.scaled_position,
+        )
     }
 
     pub fn scaled_origin(&self) -> (f64, f64, f64) {
@@ -72,10 +94,30 @@ pub trait DeviceCodegen {
 
 /// Decides what the device codegen generates and produces the glue that runs it.
 pub trait OrchestrationCodegen<'a> {
-    /// Generates everything for `program`.
-    fn convert_program(&mut self, program: &'a OptimizedProgram);
+    /// Generates everything for `program`, using the names and schedule in `interface`.
+    fn convert_program(&mut self, program: &'a OptimizedProgram, interface: &Interface);
     /// The generated source; call after `convert_program`.
     fn output(&self) -> String;
+}
+
+/// A code generator for one target language. Backends are independent: each one reads the
+/// shared `Interface` and stores its own output.
+pub trait Backend {
+    /// Short stable identifier, e.g. "rust" or "cuda". Used in errors.
+    fn name(&self) -> &str;
+
+    /// Generate everything for `program`. Results are stored in `self`.
+    fn generate(
+        &mut self,
+        program: &OptimizedProgram,
+        interface: &Interface,
+    ) -> Result<(), BackendError>;
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum BackendError {
+    #[error("code generation failed: {0}")]
+    Codegen(String),
 }
 
 /// Schedule and names shared by the device and orchestration sides of a code generator.
@@ -133,14 +175,14 @@ impl Interface {
             let base = f
                 .canonical_name
                 .as_deref()
-                .map(crate::transform_rcl::sanitize_name)
+                .map(sanitize_name)
                 .unwrap_or_else(|| "function".into());
             helpers.insert(r, unique(&mut used, base));
         }
 
         let mut constants = HashMap::new();
         for (r, c) in program.constants.iter() {
-            constants.insert(r, unique(&mut used, crate::transform_rcl::sanitize_name(&c.name)));
+            constants.insert(r, unique(&mut used, sanitize_name(&c.name)));
         }
 
         let mut auto_consts = HashMap::new();
@@ -157,7 +199,18 @@ impl Interface {
             }
         }
 
-        Self { instances, dependencies, waves, density_fns, buffers, kernels, helpers, constants, auto_consts, host_fields }
+        Self {
+            instances,
+            dependencies,
+            waves,
+            density_fns,
+            buffers,
+            kernels,
+            helpers,
+            constants,
+            auto_consts,
+            host_fields,
+        }
     }
 
     pub fn instances(&self) -> &[Instance] {
@@ -179,13 +232,22 @@ impl Interface {
         }
         self.waves
             .iter()
-            .map(|w| w.iter().filter(|i| needed.contains(i)).copied().collect::<Vec<_>>())
+            .map(|w| {
+                w.iter()
+                    .filter(|i| needed.contains(i))
+                    .copied()
+                    .collect::<Vec<_>>()
+            })
             .filter(|w| !w.is_empty())
             .collect()
     }
 
     pub fn instances_of(&self, cu: Ref<ComputeUnit>) -> Vec<Instance> {
-        self.instances.iter().filter(|i| i.cu == cu).copied().collect()
+        self.instances
+            .iter()
+            .filter(|i| i.cu == cu)
+            .copied()
+            .collect()
     }
 
     /// Distinct dimensions the unit is used at, in discovery order.
@@ -231,10 +293,16 @@ impl Interface {
 }
 
 /// Everything reachable from the entry points (breadth-first), with each instance's direct inputs.
-fn discover_instances(program: &OptimizedProgram) -> (Vec<Instance>, HashMap<Instance, Vec<Instance>>) {
+fn discover_instances(
+    program: &OptimizedProgram,
+) -> (Vec<Instance>, HashMap<Instance, Vec<Instance>>) {
     let mut instances = Vec::new();
     let mut dependencies: HashMap<Instance, Vec<Instance>> = HashMap::new();
-    let mut queue: Vec<Instance> = program.entry_points.iter().map(Instance::from_entry).collect();
+    let mut queue: Vec<Instance> = program
+        .entry_points
+        .iter()
+        .map(Instance::from_entry)
+        .collect();
     let mut i = 0;
     while i < queue.len() {
         let inst = queue[i];

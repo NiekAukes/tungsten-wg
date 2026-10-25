@@ -64,12 +64,59 @@ dependencies = [
 ]
 
 [[package]]
-name = "tungsten-wg"
+name = "tungsten-codegen"
+version = "0.1.2"
+
+[[package]]
+name = "tungsten-interface"
+version = "0.1.2"
+dependencies = [
+ "thiserror",
+ "tungsten-ir",
+]
+
+[[package]]
+name = "tungsten-ir"
+version = "0.1.2"
+
+[[package]]
+name = "tungsten-legacy"
+version = "0.1.2"
+dependencies = [
+ "bumpalo",
+ "tungsten-codegen",
+ "tungsten-ir",
+]
+
+[[package]]
+name = "tungsten-optimizer"
+version = "0.1.2"
+dependencies = [
+ "tungsten-ir",
+]
+
+[[package]]
+name = "tungsten-rust"
 version = "0.1.2"
 dependencies = [
  "bumpalo",
  "md5",
+ "tungsten-codegen",
+ "tungsten-interface",
+ "tungsten-ir",
+]
+
+[[package]]
+name = "tungsten-wg"
+version = "0.1.2"
+dependencies = [
  "thiserror",
+ "tungsten-codegen",
+ "tungsten-interface",
+ "tungsten-ir",
+ "tungsten-legacy",
+ "tungsten-optimizer",
+ "tungsten-rust",
 ]
 
 [[package]]

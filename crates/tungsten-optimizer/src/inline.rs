@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-use crate::spmt::Name;
-use crate::spmt_optimize::model::{
+use tungsten_ir::Name;
+use tungsten_ir::model::{
     ComputeUnit, DensityInput, Expression, Function, OptimizedProgram, Ref, Statement, Var,
 };
 
@@ -57,7 +57,9 @@ impl<'m> Inliner<'m> {
                 if self.program.compute_units.try_get(callee).is_none() {
                     continue;
                 }
-                let Some(caller) = self.sole_user(callee) else { continue };
+                let Some(caller) = self.sole_user(callee) else {
+                    continue;
+                };
                 if self.can_be_inlined(caller, callee) {
                     self.inline(caller, callee);
                     inlined += 1;
@@ -86,7 +88,12 @@ impl<'m> Inliner<'m> {
     /// Returns the one compute unit that uses `callee`, if there is exactly one use in total
     /// and the callee is not an entry point.
     fn sole_user(&self, callee: Ref<ComputeUnit>) -> Option<Ref<ComputeUnit>> {
-        if self.program.entry_points.iter().any(|e| e.density_function == callee) {
+        if self
+            .program
+            .entry_points
+            .iter()
+            .any(|e| e.density_function == callee)
+        {
             return None;
         }
         let mut found = None;
@@ -154,14 +161,12 @@ impl<'m> Inliner<'m> {
             return None;
         }
         let caller_unit = self.program.compute_units.try_get(caller)?;
-        let callee_unit = self.program.compute_units.try_get(callee)?;
         let ComputeUnit::DensityFunction {
             function: caller_fn,
             density_inputs,
             helper_functions,
             ..
         } = caller_unit;
-        let ComputeUnit::DensityFunction { function: callee_fn, .. } = callee_unit;
 
         // 1. complexity
         if self.caller_too_complex(caller_unit) {
@@ -219,7 +224,11 @@ impl<'m> Inliner<'m> {
         //     }
         // }
 
-        Some(InlinePlan { input: input_ref, site, reads })
+        Some(InlinePlan {
+            input: input_ref,
+            site,
+            reads,
+        })
     }
 
     /// Inlines the callee into the caller.
@@ -308,7 +317,10 @@ impl<'m> Inliner<'m> {
             .collect();
         let callee_fn_hosts = self.program.functions[callee_fn].host_inputs.clone();
         let callee_ret = self.program.functions[callee_fn].return_type.clone();
-        let call = Expression::FunctionCall { function: callee_fn, parameters: args };
+        let call = Expression::FunctionCall {
+            function: callee_fn,
+            parameters: args,
+        };
 
         let site_fn = self.program.functions.get_mut(plan.site);
         // The site now (transitively) uses the callee function's host inputs.
@@ -332,16 +344,28 @@ impl<'m> Inliner<'m> {
                 "inlined_density_{}",
                 site_fn.variables.iter().count()
             ));
-            let var = site_fn.variables.insert(Var { name, t: callee_ret });
+            let var = site_fn.variables.insert(Var {
+                name,
+                t: callee_ret,
+            });
             visit_stmts_mut(&mut site_fn.body, &mut |e| {
                 if is_read(e) {
                     *e = Expression::Variable(var);
                     replaced += 1;
                 }
             });
-            site_fn.body.insert(0, Statement::Assign { target: var, value: call });
+            site_fn.body.insert(
+                0,
+                Statement::Assign {
+                    target: var,
+                    value: call,
+                },
+            );
         }
-        debug_assert_eq!(replaced, plan.reads, "every read of the inlined density must be replaced");
+        debug_assert_eq!(
+            replaced, plan.reads,
+            "every read of the inlined density must be replaced"
+        );
     }
 }
 
@@ -380,7 +404,11 @@ fn visit_stmts(stmts: &[Statement], f: &mut dyn FnMut(&Expression)) {
         match s {
             Statement::Assign { value, .. } => visit_expr(value, f),
             Statement::Return(e) => visit_expr(e, f),
-            Statement::If { condition, then_branch, else_branch } => {
+            Statement::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
                 visit_expr(condition, f);
                 visit_stmts(then_branch, f);
                 visit_stmts(else_branch, f);
@@ -451,7 +479,11 @@ fn visit_stmts_mut(stmts: &mut [Statement], f: &mut dyn FnMut(&mut Expression)) 
         match s {
             Statement::Assign { value, .. } => visit_expr_mut(value, f),
             Statement::Return(e) => visit_expr_mut(e, f),
-            Statement::If { condition, then_branch, else_branch } => {
+            Statement::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
                 visit_expr_mut(condition, f);
                 visit_stmts_mut(then_branch, f);
                 visit_stmts_mut(else_branch, f);

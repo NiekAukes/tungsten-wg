@@ -8,12 +8,12 @@ use std::rc::Rc;
 use super::converter::FunctionConverter;
 use super::expression::{const_refs, constant_variable, convert_const_expr};
 use super::types::convert_type;
-use super::{CONFIG_STRUCT_NAME, uniform_parameters};
-use crate::interface::{Instance, Interface};
-use crate::rcl::model as rcl;
-use crate::spmt::{Name, VariableType};
-use crate::spmt_optimize::model::{ComputeUnit, Constant, Function, OptimizedProgram, Ref};
-use crate::transform_rcl_new::uniform_kernel_parameters;
+use super::{CONFIG_STRUCT_NAME, uniform_kernel_parameters, uniform_parameters};
+use crate::model as rcl;
+use tungsten_interface::{Instance, Interface};
+use tungsten_ir::model::{
+    ComputeUnit, Constant, Function, Name, OptimizedProgram, Ref, VariableType,
+};
 
 /// A converted function plus the items it still needs generated.
 pub struct Converted<'m> {

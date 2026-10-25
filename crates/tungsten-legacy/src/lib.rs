@@ -8,6 +8,9 @@ pub mod conversion;
 
 pub use model::*;
 
+/// Keeps the historical `crate::spmt::...` and `$crate::spmt::...` paths valid.
+pub extern crate self as spmt;
+
 pub fn try_derive_type<'a>(expr: &model::Expression<'a>) -> Option<model::VariableType> {
     match expr {
         model::Expression::Variable(var) => Some(var.t.clone()),
@@ -28,7 +31,7 @@ pub fn try_derive_type<'a>(expr: &model::Expression<'a>) -> Option<model::Variab
         model::Expression::DensityVariable(_, _) => Some(model::VariableType::DensityInput),
         model::Expression::PermutationTable(_) => Some(model::VariableType::PermutationTable),
         model::Expression::Construct { t, .. } => Some(t.clone()),
-        model::Expression::ArrayAccess { array, index } => {
+        model::Expression::ArrayAccess { array, index: _ } => {
             let array_type: VariableType = try_derive_type(array)?;
             match array_type {
                 model::VariableType::Vec3 => Some(model::VariableType::F64),
@@ -37,9 +40,9 @@ pub fn try_derive_type<'a>(expr: &model::Expression<'a>) -> Option<model::Variab
                 _ => None, // For other array types, we would need more information to derive the element type
             }
         }
-        model::Expression::ConstructExtern { t, args } => Some(t.clone()), // Assume the type is determined by the construct extern declaration
-        model::Expression::ArrayLiteral(expressions) => None,
-        model::Expression::ExplicitCast { to, expr } => Some(to.clone()),
+        model::Expression::ConstructExtern { t, args: _ } => Some(t.clone()), // Assume the type is determined by the construct extern declaration
+        model::Expression::ArrayLiteral(_) => None,
+        model::Expression::ExplicitCast { to, expr: _ } => Some(to.clone()),
     }
 }
 

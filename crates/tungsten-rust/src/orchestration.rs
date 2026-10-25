@@ -12,14 +12,15 @@ use super::{
     AUTO_CONSTS_STRUCT_NAME, HOST_CONSTS_STRUCT_NAME, INTERNAL_BUFFERS_STRUCT_NAME,
     ORCHESTRATION_STRUCT_NAME, TransformRclOrchestration,
 };
-use crate::interface::naming::{unique, unit_base_name};
-use crate::interface::{DeviceCodegen, Instance, Interface, OrchestrationCodegen};
-use crate::rcl::codegen::RustCodeGenerator;
-use crate::rcl::model as rcl;
-use crate::spmt::VariableType;
-use crate::spmt::model::Interned;
-use crate::spmt_optimize::model::{ComputeUnit, HostInput, OptimizedProgram, PermutationTableInput};
-use crate::transform_orchestration_rcl::random::xoroshiro_seed;
+use crate::interned::Interned;
+use crate::model as rcl;
+use crate::model::codegen::RustCodeGenerator;
+use crate::random::xoroshiro_seed;
+use tungsten_interface::naming::{unique, unit_base_name};
+use tungsten_interface::{DeviceCodegen, Instance, Interface, OrchestrationCodegen};
+use tungsten_ir::model::{
+    ComputeUnit, HostInput, OptimizedProgram, PermutationTableInput, Ref, VariableType,
+};
 
 /// An argument of an auto-const initializer.
 #[derive(Debug, Clone, PartialEq)]
@@ -77,7 +78,7 @@ pub fn permutation_table_specs(program: &OptimizedProgram, interface: &Interface
 }
 
 /// Element type of an instance's buffer is its unit's return type.
-fn unit_return_type(program: &OptimizedProgram, cu: crate::spmt_optimize::model::Ref<ComputeUnit>) -> &VariableType {
+fn unit_return_type(program: &OptimizedProgram, cu: Ref<ComputeUnit>) -> &VariableType {
     let ComputeUnit::DensityFunction { function, .. } = &program.compute_units[cu];
     &program.functions[*function].return_type
 }
@@ -325,14 +326,26 @@ impl<'m> TransformRclOrchestration<'m> {
     fn struct_ref(&self, s: rcl::Struct) -> rcl::StructRef<'m> {
         Interned::new(self.arena.alloc(s))
     }
+
+    /// The density module source, importing the orchestration module.
+    pub fn density_module(&self) -> String {
+        self.device_codegen.render(
+            &self.density_module_name,
+            &[format!("super::{}::*", self.orchestration_module_name)],
+        )
+    }
+
+    /// The orchestration module source, importing the density module. Call after `convert_program`.
+    pub fn orchestration_module(&self) -> String {
+        RustCodeGenerator::new().generate_inline_module(&self.model, &self.orchestration_module_name)
+    }
 }
 
 impl<'a, 'm> OrchestrationCodegen<'a> for TransformRclOrchestration<'m> {
     /// Generates the kernels on the device side, then the structs and `Orchestration` impl.
-    /// Calling it again replaces the orchestration model.
-    fn convert_program(&mut self, program: &'a OptimizedProgram) {
-        let interface = Interface::build(program);
-
+    /// Calling it again replaces the orchestration model. `interface` must be the one the
+    /// device codegen was built with.
+    fn convert_program(&mut self, program: &'a OptimizedProgram, interface: &Interface) {
         // Device code first: one kernel per scheduled instance (repeats are no-ops).
         for wave in interface.waves() {
             for inst in wave {
@@ -343,11 +356,11 @@ impl<'a, 'm> OrchestrationCodegen<'a> for TransformRclOrchestration<'m> {
         self.model = rcl::RCL::new();
         self.model.add_import(format!("super::{}::*", self.density_module_name));
 
-        let specs = permutation_table_specs(program, &interface);
+        let specs = permutation_table_specs(program, interface);
         for s in [
-            host_consts_struct(program, &interface),
+            host_consts_struct(program, interface),
             auto_consts_struct(&specs),
-            internal_buffers_struct(program, &interface),
+            internal_buffers_struct(program, interface),
             orchestration_struct(),
         ] {
             let s = self.struct_ref(s);
@@ -365,7 +378,7 @@ impl<'a, 'm> OrchestrationCodegen<'a> for TransformRclOrchestration<'m> {
                 &mut used,
                 format!("orchestrate_{}", unit_base_name(program, entry.cu)),
             );
-            let method = entry_method(program, &interface, name, &entry);
+            let method = entry_method(program, interface, name, &entry);
             methods.push(self.intern(method));
         }
         self.model.impls.push(rcl::Impl { type_name: ORCHESTRATION_STRUCT_NAME.to_string(), methods });
@@ -373,12 +386,7 @@ impl<'a, 'm> OrchestrationCodegen<'a> for TransformRclOrchestration<'m> {
 
     /// Density module followed by the orchestration module.
     fn output(&self) -> String {
-        let density = self.device_codegen.render(
-            &self.density_module_name,
-            &[format!("super::{}::*", self.orchestration_module_name)],
-        );
-        let orchestration = RustCodeGenerator::new()
-            .generate_inline_module(&self.model, &self.orchestration_module_name);
-        density + "\n\n" + &orchestration
+        self.density_module() + "\n\n" + &self.orchestration_module()
     }
 }
+

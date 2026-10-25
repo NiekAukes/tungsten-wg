@@ -1,7 +1,15 @@
 use std::collections::HashSet;
 
-use crate::spmt_optimize::model::{ComputeUnit, HostInput, OptimizedProgram, PermutationTableInput, Ref};
-use crate::transform_rcl::sanitize_name;
+use tungsten_ir::model::{ComputeUnit, HostInput, OptimizedProgram, PermutationTableInput, Ref};
+
+/// Replaces characters that are not valid in generated identifiers.
+pub fn sanitize_name(name: &str) -> String {
+    name.replace(':', "_")
+        .replace('/', "_")
+        .replace('<', "_")
+        .replace('>', "_")
+        .replace('-', "_")
+}
 
 /// `base`, or `base_N` for the first free N if `base` is already taken.
 pub fn unique(used: &mut HashSet<String>, base: String) -> String {

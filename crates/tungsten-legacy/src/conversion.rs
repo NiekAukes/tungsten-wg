@@ -17,8 +17,8 @@
 
 use std::{collections::HashMap, fmt};
 
-use super::model::{self as new, Arena, Ref};
 use crate::spmt::{self as old, Name::Named};
+use tungsten_ir::model::{self as new, Arena, Ref};
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -167,12 +167,12 @@ impl<'m> Scope<'m> {
         }
     }
 
-    fn unknown_var(&self, v: &old::Var<'m>) -> ConvertError {
-        ConvertError::UnknownVariable {
-            context: self.label.clone(),
-            var: format!("{:?}", v.name),
-        }
-    }
+    // fn unknown_var(&self, v: &old::Var<'m>) -> ConvertError {
+    //     ConvertError::UnknownVariable {
+    //         context: self.label.clone(),
+    //         var: format!("{:?}", v.name),
+    //     }
+    // }
 
     fn find_named_var(&self, target: &old::Var<'m>) -> Option<Ref<new::Var>> {
         for (ref_var, new_var) in self.vars.iter() {
@@ -560,7 +560,7 @@ impl<'m> Converter<'m> {
                     // None => return Err(scope.unknown_var(target)),
                     None => {
                         panic!("Unknown variable: {:?}", target.name);
-                        return Err(scope.unknown_var(target));
+                        // return Err(scope.unknown_var(target));
                     }
                 };
                 N::Assign {

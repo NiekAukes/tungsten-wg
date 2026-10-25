@@ -1,7 +1,7 @@
-use crate::rcl::model as rcl;
-use crate::spmt::VariableType;
-use crate::spmt_optimize::model as opt;
-use crate::transform_rcl::sanitize_name;
+use crate::model as rcl;
+use tungsten_interface::naming::sanitize_name;
+use tungsten_ir::model as opt;
+use tungsten_ir::model::VariableType;
 
 use super::{BASE3D_NOISE_SAMPLER_STRUCT_NAME, PERLIN_NOISE_SAMPLER_STRUCT_NAME};
 

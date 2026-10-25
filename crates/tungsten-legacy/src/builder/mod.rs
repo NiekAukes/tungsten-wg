@@ -6,12 +6,9 @@ use crate::spmt::{
 };
 use std::{
     cell::RefCell,
-    collections::{HashSet, hash_map::DefaultHasher},
+    collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
 };
-
-type E<'m> = Expression<'m>;
-type S<'m> = Statement<'m>;
 
 mod collector;
 mod hash;

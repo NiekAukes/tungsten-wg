@@ -4,7 +4,7 @@ This module generates Rust library code from the intermediate CPU language repre
 */
 
 use super::model as icl;
-use crate::spmt::pretty::Printer;
+use tungsten_codegen::Printer;
 
 /// Generate Rust code for ICL structures and functions
 pub struct RustCodeGenerator;
@@ -578,7 +578,7 @@ impl RustCodeGenerator {
                 format!("{} {{ {} }}", struct_name, field_strs.join(", "))
             }
             icl::Expression::ArrayInit {
-                element_type,
+                element_type: _,
                 element,
                 count,
             } => {

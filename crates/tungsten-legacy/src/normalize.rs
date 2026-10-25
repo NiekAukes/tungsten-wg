@@ -1,4 +1,4 @@
-use crate::{orchestrate::model::ShaderDependency, spmt::model::{Expression, MainDensityFunction, Var}};
+use crate::spmt::model::{Expression, MainDensityFunction, Var};
 
 /// Normalization utilities for SPMT programs.
 /// These utilities help in normalizing SPMT programs, ensuring consistent formatting and structure.
@@ -17,11 +17,6 @@ pub trait NormalizedDensityFunction<'m> {
 
 pub trait NormalizedFunction<'m> {
     fn normal_parameters(&self) -> Vec<super::model::Var<'m>>;
-}
-
-pub trait NormalizedShaderInput<'m> {
-    fn normal_shader_dependency_list(&self) -> Vec<ShaderDependency<'m>>;
-    fn normal_permutation_table_list(&self) -> Vec<super::model::PermutationTableInput>;
 }
 
 // pub fn normalize_spmt_program(program: &mut super::model::SPMT<'_>) {
@@ -91,19 +86,6 @@ impl<'m> NormalizedFunction<'m> for super::model::Function<'m> {
     fn normal_parameters(&self) -> Vec<super::model::Var<'m>> {
         let mut list = self.parameters.clone();
         list.sort_by(|a, b| a.name.cmp(&b.name));
-        list
-    }
-}
-
-impl<'m> NormalizedShaderInput<'m> for ShaderDependency<'m> {
-    fn normal_shader_dependency_list(&self) -> Vec<ShaderDependency<'m>> {
-        let mut list = self.shader.inputs.clone();
-        list.sort_by(|a, b| a.shader.source_hash.cmp(&b.shader.source_hash));
-        list
-    }
-    fn normal_permutation_table_list(&self) -> Vec<super::model::PermutationTableInput> {
-        let mut list = self.shader.permutation_tables.clone();
-        list.sort();
         list
     }
 }

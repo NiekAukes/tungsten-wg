@@ -6,16 +6,15 @@ Shared by expression.rs, statement.rs and function.rs.
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use crate::interface::Interface;
+use tungsten_interface::Interface;
+use tungsten_interface::naming::sanitize_name;
+use tungsten_ir::model::{
+    Arena, ComputeUnit, Constant, DensityInput, Expression, Function, Name, OptimizedProgram,
+    PermutationTableInput, Ref, Var, VariableType,
+};
 use super::types::{convert_type, derive_binop_type, derive_const_type, element_type};
 use super::uniform_parameters;
-use crate::rcl::model as rcl;
-use crate::spmt::{Name, VariableType};
-use crate::spmt_optimize::model::{
-    Arena, ComputeUnit, Constant, DensityInput, Expression, Function, OptimizedProgram,
-    PermutationTableInput, Ref, Var,
-};
-use crate::transform_rcl::sanitize_name;
+use crate::model as rcl;
 
 /// The five parameters every density and helper function starts with.
 pub struct UniformVars {

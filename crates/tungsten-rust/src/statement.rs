@@ -3,9 +3,8 @@ Statement conversion from optimized SPMT to RCL.
 */
 
 use super::converter::FunctionConverter;
-use crate::rcl::model as rcl;
-use crate::spmt::VariableType;
-use crate::spmt_optimize::model::Statement;
+use crate::model as rcl;
+use tungsten_ir::model::{Statement, VariableType};
 use std::rc::Rc;
 
 impl<'a> FunctionConverter<'a> {
