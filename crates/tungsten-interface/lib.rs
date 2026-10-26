@@ -16,7 +16,7 @@ pub mod scale;
 
 pub use scale::Scale;
 
-use naming::{auto_const_field_name, host_field_name, sanitize_name, unique, unit_base_name};
+use naming::{auto_const_field_name, host_field_name, unique, unit_base_name};
 
 use crate::naming::NamingRules;
 
@@ -150,7 +150,7 @@ impl Interface {
         let waves = arrange_waves(&instances, dependencies.clone());
 
         // One namespace for module-level items (functions, constants, kernels).
-        let mut used = HashSet::new();
+        let mut used = rules.used_set();
         let mut used_fields = HashSet::new();
 
         let mut density_fns = HashMap::new();
@@ -190,14 +190,14 @@ impl Interface {
             let base = f
                 .canonical_name
                 .as_deref()
-                .map(sanitize_name)
+                .map(rules.sanitize)
                 .unwrap_or_else(|| "function".into());
             helpers.insert(r, unique(&mut used, base));
         }
 
         let mut constants = HashMap::new();
         for (r, c) in program.constants.iter() {
-            constants.insert(r, unique(&mut used, sanitize_name(&c.name)));
+            constants.insert(r, unique(&mut used, (rules.sanitize)(&c.name)));
         }
 
         let mut auto_consts = HashMap::new();

@@ -32,6 +32,7 @@ Dependencies flow downward; `tungsten-ir` is the base.
 | `tungsten-interface` | Backend-agnostic contract. `Interface::build(program, naming_rules)` schedules `Instance`s (keyed by unit, dimensions, scales) into waves and fixes every generated name (kernels, buffers, host-input fields, auto consts). Traits: `DeviceCodegen`, `OrchestrationCodegen`, `Backend` (+ `BackendError`). Also `naming.rs` (`NamingRules`) and `scale.rs`, and `pretty/` (printing helpers, DOT output). |
 | `tungsten-codegen`   | Generic code-generation constructs. Currently the text `Printer`.                                                                                                                                                                                                                                                                                                                                          |
 | `tungsten-rust`      | The reference backend ("RCL", Rust). `RustBackend` / `RustConfig` / `RustOutput` in `backend.rs`; `RCLCodegen` (device side, implements `DeviceCodegen`) and `TransformRclOrchestration` (orchestration side). Has its own target AST in `model/` and `interned.rs`.                                                                                                                                       |
+| `tungsten-java`      | Java 21 backend (spec in `SPEC.md`). `JavaBackend` / `JavaConfig` / `JavaOutput` in `backend.rs`; `JavaCodegen` (device side) and `TransformJavaOrchestration`. Own AST and printer in `model/`. Reuses type-derivation and auto-const helpers from `tungsten-rust`. Feature `java` in the facade (off by default). Smoke test in `src/tests.rs`. |
 | `tungsten-legacy`    | The old SPMT IR (arena `Interned<'m, T>` nodes in a `bumpalo::Bump`), its `builder/` API and macros (`body!`, `build!`, `extern_fns!`, `pos3!`, `vec3!`), `dag.rs`, `normalize.rs`, `pretty.rs`. `conversion::convert(&SPMT) -> Result<OptimizedProgram>` lowers it into the new IR.                                                                                                                       |
 
 Crate sources sit directly in the crate root (`crates/tungsten-ir/lib.rs`, `crates/tungsten-interface/lib.rs`, `crates/tungsten-codegen/lib.rs`) for some crates and under `src/` for others (`tungsten-legacy`, `tungsten-optimizer`, `tungsten-rust`). Check each `Cargo.toml` if unsure.
@@ -50,7 +51,7 @@ In `tungsten-rust`, every density/helper function shares the same leading parame
 
 - `old/` holds the pre-redesign single-crate source. It is not part of the workspace and doesn't compile. Only the CUDA pieces (`old/cuda`, `old/transform_cuda`, `old/transform_orchestration_cuda`) still have content, kept as reference for the CUDA rework. The other subdirectories are empty.
 
-Planned backends (`tungsten-cuda`, `tungsten-java`, OpenCL) should follow the `tungsten-rust` structure on top of `tungsten-interface` and be validated against Rust output.
+Planned backends (`tungsten-cuda`, OpenCL) should follow the `tungsten-rust` structure on top of `tungsten-interface` and be validated against Rust output.
 
 ## Conventions
 

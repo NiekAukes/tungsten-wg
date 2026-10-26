@@ -21,6 +21,12 @@ impl Default for RustConfig {
     }
 }
 
+impl RustConfig {
+    pub fn to_backend(self) -> RustBackend {
+        RustBackend::new(self)
+    }
+}
+
 /// Generated Rust source, available after [`Backend::generate`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RustOutput {

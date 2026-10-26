@@ -16,6 +16,11 @@ pub use tungsten_rust as rust;
 #[cfg(feature = "rust")]
 pub use tungsten_rust::backend::{RustBackend, RustConfig, RustOutput};
 
+#[cfg(feature = "java")]
+pub use tungsten_java as java;
+#[cfg(feature = "java")]
+pub use tungsten_java::backend::{JavaBackend, JavaConfig, JavaOutput};
+
 pub use tungsten_interface::{Backend, BackendError};
 
 use tungsten_interface::Interface;
