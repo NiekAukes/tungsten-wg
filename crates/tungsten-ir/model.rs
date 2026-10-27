@@ -81,7 +81,7 @@ impl OwnerTag {
 }
 
 pub struct Ref<T> {
-    tag: OwnerTag,
+    pub(crate) tag: OwnerTag,
     idx: u32,
     generation: u32,
     _m: PhantomData<fn() -> T>,
@@ -134,16 +134,56 @@ impl<T: Debug> Debug for Slot<T> {
 
 pub struct Arena<T> {
     tag: OwnerTag,
+    /// Tag of the arena this one was (transitively) cloned from; its own tag if it is an original.
+    origin: OwnerTag,
     slots: Vec<Slot<T>>,
     free: Vec<u32>,
 }
 
 impl<T> Arena<T> {
     pub fn new() -> Self {
+        let tag = OwnerTag::fresh();
         Self {
-            tag: OwnerTag::fresh(),
+            tag,
+            origin: tag,
             slots: vec![],
             free: vec![],
+        }
+    }
+
+    pub fn tag(&self) -> OwnerTag {
+        self.tag
+    }
+
+    /// The same slot as `r` (a ref into `from`), but as a ref into `self`.
+    ///
+    /// Panics if `r` doesn't belong to `from`, or if `from` and `self` aren't clones of the same
+    /// arena. The result may be stale in `self` (e.g. the slot was removed); check with
+    /// `try_get` or `contains`.
+    pub fn translate(&self, r: Ref<T>, from: &Arena<T>) -> Ref<T> {
+        assert_eq!(r.tag, from.tag, "Ref used on the wrong arena");
+        assert_eq!(
+            from.origin, self.origin,
+            "translate between arenas that are not clones of each other"
+        );
+        Ref { tag: self.tag, ..r }
+    }
+
+    /// Clones with a fresh tag (same origin), cloning every value with `f`.
+    /// Idx and generation of every slot are preserved.
+    pub(crate) fn clone_with(&self, mut f: impl FnMut(&T) -> T) -> Self {
+        Self {
+            tag: OwnerTag::fresh(),
+            origin: self.origin,
+            slots: self
+                .slots
+                .iter()
+                .map(|s| Slot {
+                    generation: s.generation,
+                    value: s.value.as_ref().map(&mut f),
+                })
+                .collect(),
+            free: self.free.clone(),
         }
     }
 
@@ -232,6 +272,24 @@ impl<T> Arena<T> {
     }
 }
 
+/// A clone with a fresh tag. Refs stored *inside* the values are not rewritten; the
+/// `Clone` impls of the IR types that hold arenas take care of that.
+impl<T: Clone> Clone for Arena<T> {
+    fn clone(&self) -> Self {
+        self.clone_with(T::clone)
+    }
+}
+
+impl<T> Arena<T> {
+    pub fn values(&self) -> impl Iterator<Item = &T> {
+        self.slots.iter().filter_map(|s| s.value.as_ref())
+    }
+
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut T> {
+        self.slots.iter_mut().filter_map(|s| s.value.as_mut())
+    }
+}
+
 impl<T> std::ops::Index<Ref<T>> for Arena<T> {
     type Output = T;
 
@@ -303,6 +361,7 @@ pub struct EntryPoint {
     pub scaled_position: (f64, f64, f64),
 }
 
+/// `Clone` gives `density_inputs` a fresh tag and rewrites the refs into it (see `retag`).
 #[derive(Debug)]
 pub enum ComputeUnit {
     DensityFunction {
@@ -375,6 +434,7 @@ pub struct Var {
     pub t: VariableType,
 }
 
+/// `Clone` gives `variables` a fresh tag and rewrites the refs into it (see `retag`).
 #[derive(Debug)]
 pub struct Function {
     pub canonical_name: Option<String>,
@@ -391,6 +451,10 @@ pub struct Function {
     pub source_hash: u64,
 }
 
+/// `Clone` is fully independent: every arena (including the ones nested in compute units and
+/// functions) gets a fresh tag, and every embedded `Ref` is rewritten to it.
+///
+/// Any new `Ref`-holding field anywhere in the IR must be added to the walker in `retag.rs`.
 pub struct OptimizedProgram {
     pub compute_units: Arena<ComputeUnit>,
     pub functions: Arena<Function>,
