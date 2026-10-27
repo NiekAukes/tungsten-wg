@@ -132,6 +132,35 @@ pub const JAVA_RESERVED: &[&str] = &[
     "create",
 ];
 
+/// C++20 keywords and alternative tokens, CUDA built-ins used unqualified, and names the generated
+/// CUDA files declare or use (see the CUDA SPEC.md §4.1).
+pub const CUDA_RESERVED: &[&str] = &[
+    // C++20 keywords
+    "alignas", "alignof", "asm", "auto", "bool", "break", "case", "catch", "char", "char8_t",
+    "char16_t", "char32_t", "class", "concept", "const", "consteval", "constexpr", "constinit",
+    "const_cast", "continue", "co_await", "co_return", "co_yield", "decltype", "default", "delete",
+    "do", "double", "dynamic_cast", "else", "enum", "explicit", "export", "extern", "false",
+    "float", "for", "friend", "goto", "if", "inline", "int", "long", "mutable", "namespace", "new",
+    "noexcept", "nullptr", "operator", "private", "protected", "public", "register",
+    "reinterpret_cast", "requires", "return", "short", "signed", "sizeof", "static",
+    "static_assert", "static_cast", "struct", "switch", "template", "this", "thread_local",
+    "throw", "true", "try", "typedef", "typeid", "typename", "union", "unsigned", "using",
+    "virtual", "void", "volatile", "wchar_t", "while",
+    // alternative tokens
+    "and", "and_eq", "bitand", "bitor", "compl", "not", "not_eq", "or", "or_eq", "xor", "xor_eq",
+    // common macros and globals
+    "NULL", "std", "assert", "printf", "main",
+    // CUDA built-ins
+    "threadIdx", "blockIdx", "blockDim", "gridDim", "warpSize", "int3", "double3", "float3",
+    "make_int3", "make_double3", "dim3", "cudaStream_t", "cudaError_t",
+    // generated and runtime names
+    "tw", "dev", "Ctx", "Config", "PositionIterator", "HostConsts", "DeviceHostConsts",
+    "AutoConsts", "BufferLayout", "Orchestration", "Status", "Vec3", "Pos3", "Array", "Impl",
+    "PerlinNoiseSampler", "InterpolatedNoiseSampler",
+    // uniform parameters and kernel locals
+    "p", "ctx", "local", "origin", "buffers", "auto_constants", "host_consts", "r", "config",
+];
+
 impl NamingRules {
     pub fn rust() -> Self {
         Self {
@@ -144,6 +173,13 @@ impl NamingRules {
         Self {
             reserved: JAVA_RESERVED.iter().map(|s| s.to_string()).collect(),
             sanitize: java_sanitize,
+        }
+    }
+
+    pub fn cuda() -> Self {
+        Self {
+            reserved: CUDA_RESERVED.iter().map(|s| s.to_string()).collect(),
+            sanitize: cuda_sanitize,
         }
     }
 
@@ -186,6 +222,24 @@ pub fn java_sanitize(name: &str) -> String {
     }
     if s == "_" {
         s = "_0".to_string();
+    }
+    s
+}
+
+/// A legal C++ identifier that is never reserved by the implementation: other characters become
+/// `_`, runs of `_` collapse, and a name that is empty or starts with a digit or `_` gets a `v`
+/// prefix (so `__x` and `_X` can't be produced).
+pub fn cuda_sanitize(name: &str) -> String {
+    let mut s = String::with_capacity(name.len() + 1);
+    for c in name.chars() {
+        let c = if c.is_ascii_alphanumeric() { c } else { '_' };
+        if c == '_' && s.ends_with('_') {
+            continue;
+        }
+        s.push(c);
+    }
+    if s.is_empty() || s.starts_with(|c: char| c.is_ascii_digit() || c == '_') {
+        s.insert(0, 'v');
     }
     s
 }
@@ -251,4 +305,20 @@ pub fn unit_base_name(
         .as_deref()
         .map(rules.sanitize)
         .unwrap_or_else(|| format!("density_function_{:x}", source_hash))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cuda_sanitize;
+
+    #[test]
+    fn cuda_sanitize_rules() {
+        assert_eq!(cuda_sanitize("minecraft:overworld/noise"), "minecraft_overworld_noise");
+        assert_eq!(cuda_sanitize("a__b--c"), "a_b_c");
+        assert_eq!(cuda_sanitize("__x"), "v_x");
+        assert_eq!(cuda_sanitize("_X"), "v_X");
+        assert_eq!(cuda_sanitize("3d"), "v3d");
+        assert_eq!(cuda_sanitize(""), "v");
+        assert_eq!(cuda_sanitize("ok_name"), "ok_name");
+    }
 }

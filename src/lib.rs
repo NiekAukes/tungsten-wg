@@ -21,6 +21,11 @@ pub use tungsten_java as java;
 #[cfg(feature = "java")]
 pub use tungsten_java::backend::{JavaBackend, JavaConfig, JavaOutput};
 
+#[cfg(feature = "cuda")]
+pub use tungsten_cuda as cuda;
+#[cfg(feature = "cuda")]
+pub use tungsten_cuda::backend::{CudaBackend, CudaConfig, CudaOutput};
+
 #[cfg(feature = "inspect")]
 pub use tungsten_inspect as inspect;
 #[cfg(feature = "inspect")]

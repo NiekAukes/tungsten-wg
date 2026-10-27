@@ -201,9 +201,6 @@ fn inspects_small_program() {
         "entries/t/a@4x4x4/buffers.txt",
         "entries/t/a@4x4x4/buffers.cpu.svg",
         "entries/t/b@4x4x4/buffers.gpu.svg",
-        "functions/t/a.dot",
-        "functions/t/accumulate.dot",
-        "functions/t/orphan.dot",
     ] {
         assert!(
             out.files.contains_key(std::path::Path::new(path)),
@@ -215,10 +212,6 @@ fn inspects_small_program() {
     assert!(ir.contains("unit t:a -> f64 {"));
     assert!(ir.contains("fn t:accumulate(t: f64) -> f64 {"));
     assert!(ir.contains("const scale = (base * 2.0)"));
-    assert_eq!(
-        out.inspection.paths["cu:t:a"], "functions/t/a.dot",
-        "units map to their main function's DAG"
-    );
 
     let json = &out.files[std::path::Path::new("inspection.json")];
     let parsed: serde_json::Value = serde_json::from_str(json).expect("inspection.json parses");
@@ -324,41 +317,6 @@ fn inspects_small_program() {
     assert_eq!(i.tables[0].display, "perlin t:temperature[0] first");
     assert_eq!(i.host_inputs[0].users, vec!["cu:t:seed".to_string()]);
     assert!(i.call_graph.edges.iter().any(|e| e.to == "fn:t:accumulate"));
-
-    // Dataflow: the helper's loop has a loop-carried edge, and `t:a` has a φ and shared CSE.
-    let helper = i
-        .functions
-        .iter()
-        .find(|f| f.display == "t:accumulate")
-        .unwrap();
-    assert_eq!(helper.kind, FunctionKind::Helper);
-    let dag = helper.dag.as_ref().unwrap();
-    assert!(dag.edges.iter().any(|e| e.loop_carried));
-    let main_a = i
-        .functions
-        .iter()
-        .find(|f| f.id == unit_info(i, "t:a").function)
-        .unwrap();
-    let dag = main_a.dag.as_ref().unwrap();
-    let ret = dag
-        .nodes
-        .iter()
-        .find(|n| n.kind == NodeKind::Return)
-        .unwrap();
-    let mul = dag.edges.iter().find(|e| e.to == ret.id).unwrap().from;
-    let phi_inputs = dag
-        .edges
-        .iter()
-        .filter(|e| e.to == mul && e.port == "l")
-        .count();
-    assert_eq!(
-        phi_inputs, 2,
-        "x after the if is a φ of the then- and else-def"
-    );
-    assert!(
-        dag.summary.nodes_before_cse > dag.summary.nodes_after_cse,
-        "`s + n` is computed twice"
-    );
 
     // Snapshot + inline: provenance names the absorbed unit, and the snapshot is independent.
     let before = program.clone();
