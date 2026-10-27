@@ -18,6 +18,7 @@ members = [
     "crates/tungsten-codegen",
     "crates/tungsten-interface",
     "crates/tungsten-java",
+    "crates/tungsten-inspect",
     "crates/tungsten-ir",
     "crates/tungsten-legacy",
     "crates/tungsten-optimizer",
@@ -34,6 +35,8 @@ repository = "https://github.com/NiekAukes/tungsten-wg"
 [workspace.dependencies]
 bumpalo = "3.19.0"
 md5 = "0.8.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 thiserror = "1.0.40"
 tungsten-ir = { path = "crates/tungsten-ir" }
 tungsten-codegen = { path = "crates/tungsten-codegen" }
@@ -42,11 +45,13 @@ tungsten-optimizer = { path = "crates/tungsten-optimizer" }
 tungsten-rust = { path = "crates/tungsten-rust" }
 tungsten-java = { path = "crates/tungsten-java" }
 tungsten-legacy = { path = "crates/tungsten-legacy" }
+tungsten-inspect = { path = "crates/tungsten-inspect" }
 
 [features]
 default = ["rust"]
 rust = ["dep:tungsten-rust"]
 java = ["dep:tungsten-java"]
+inspect = ["dep:tungsten-inspect"]
 
 [dependencies]
 thiserror.workspace = true
@@ -57,6 +62,7 @@ tungsten-optimizer.workspace = true
 tungsten-legacy.workspace = true
 tungsten-rust = { workspace = true, optional = true }
 tungsten-java = { workspace = true, optional = true }
+tungsten-inspect = { workspace = true, optional = true }
 
 [lib]
 name = "tungsten_wg"
