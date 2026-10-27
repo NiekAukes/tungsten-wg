@@ -10,13 +10,13 @@ use tungsten_ir::model::{
 /// The grid a compute unit is evaluated over, as observed by whoever consumes it
 /// (an entry point or a `DensityInput` of another compute unit).
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Grid {
-    dimensions: (i32, i32, i32),
-    scaled_origin: (f64, f64, f64),
-    scaled_position: (f64, f64, f64),
+pub struct GridInfo {
+    pub dimensions: (i32, i32, i32),
+    pub scaled_origin: (f64, f64, f64),
+    pub scaled_position: (f64, f64, f64),
 }
 
-impl Grid {
+impl GridInfo {
     fn of_input(i: &DensityInput) -> Self {
         Self {
             dimensions: i.dimensions,
@@ -26,14 +26,92 @@ impl Grid {
     }
 }
 
+/// Whether a compute unit can be inlined into its consumer, for the program as it is.
+#[derive(Debug, Clone, PartialEq)]
+pub enum InlineVerdict {
+    /// It would be inlined into `into`, at `site`, which reads it `reads` times.
+    Inlinable {
+        into: Ref<ComputeUnit>,
+        site: Ref<Function>,
+        reads: usize,
+    },
+    Rejected(InlineRejection),
+}
+
+/// The first inlining criterion a compute unit fails, in the order the inliner checks them.
+#[derive(Debug, Clone, PartialEq)]
+pub enum InlineRejection {
+    /// Entry points must stay addressable.
+    EntryPoint,
+    /// No compute unit reads it (and it isn't an entry point).
+    Unused,
+    /// Total number of `DensityInput`s pointing at it, across all compute units.
+    MultipleUses(usize),
+    /// Its only reader is itself.
+    SelfUse,
+    /// The caller is already too complex. Never produced today (the criterion is a placeholder).
+    CallerTooComplex,
+    /// The caller is consumed on several different grids (or not at all).
+    CallerGridAmbiguous,
+    /// The grid the caller reads it on differs from the grid the caller is consumed on.
+    GridMismatch { caller: GridInfo, input: GridInfo },
+    /// `function` reads it with an explicit index (an identity mapping is required).
+    IndexedRead { function: Ref<Function> },
+    /// More than one function of the caller reads it.
+    ReadInSeveralFunctions,
+    /// The caller declares the input but never reads it.
+    NotRead,
+}
+
+/// One merge done by the inliner. Refs are in the tags of the program that was mutated.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineRecord {
+    /// Iteration of the inliner's outer loop, from 0.
+    pub round: usize,
+    /// Still valid after the pass.
+    pub caller: Ref<ComputeUnit>,
+    /// Stale after the pass (the unit was removed).
+    pub callee: Ref<ComputeUnit>,
+    /// Canonical name of the callee's function, for display.
+    pub callee_name: Option<String>,
+    /// Now a helper of `caller`.
+    pub callee_function: Ref<Function>,
+    /// The caller function that read the callee.
+    pub site: Ref<Function>,
+    pub reads: usize,
+}
+
 /// Everything `inline` needs to know, produced by `plan` after all criteria passed.
 struct InlinePlan {
+    /// The one compute unit that reads the callee.
+    caller: Ref<ComputeUnit>,
     /// The caller's `DensityInput` that points at the callee.
     input: Ref<DensityInput>,
     /// The (single) function of the caller that reads `input`.
     site: Ref<Function>,
     /// How many times `site` reads `input`.
     reads: usize,
+}
+
+/// One verdict per compute unit, for the program as it is (no iteration: inlining one unit can
+/// change the verdicts of others).
+pub fn explain_inline(program: &OptimizedProgram) -> Vec<(Ref<ComputeUnit>, InlineVerdict)> {
+    let planner = Planner { program };
+    program
+        .compute_units
+        .iter()
+        .map(|(r, _)| {
+            let verdict = match planner.plan(r) {
+                Ok(plan) => InlineVerdict::Inlinable {
+                    into: plan.caller,
+                    site: plan.site,
+                    reads: plan.reads,
+                },
+                Err(rejection) => InlineVerdict::Rejected(rejection),
+            };
+            (r, verdict)
+        })
+        .collect()
 }
 
 pub struct Inliner<'m> {
@@ -45,33 +123,43 @@ impl<'m> Inliner<'m> {
         Self { program }
     }
 
+    fn planner(&self) -> Planner<'_> {
+        Planner {
+            program: self.program,
+        }
+    }
+
     /// Runs the inlining pass until no more compute units can be inlined.
-    /// Returns the number of compute units that were inlined.
-    pub fn traverse(&mut self) -> usize {
-        let mut inlined = 0;
-        loop {
+    /// Returns one record per merge, in the order they happened.
+    pub fn traverse(&mut self) -> Vec<InlineRecord> {
+        let mut records = Vec::new();
+        for round in 0.. {
             let mut progressed = false;
             // The candidate list can go stale while we mutate (a candidate may have been
             // removed, or its caller may have changed), so everything is re-checked per item.
-            for callee in self.find_inlinable() {
+            for callee in self.planner().find_inlinable() {
                 if self.program.compute_units.try_get(callee).is_none() {
                     continue;
                 }
-                let Some(caller) = self.sole_user(callee) else {
-                    continue;
-                };
-                if self.can_be_inlined(caller, callee) {
-                    self.inline(caller, callee);
-                    inlined += 1;
+                if let Ok(plan) = self.planner().plan(callee) {
+                    records.push(self.inline(callee, plan, round));
                     progressed = true;
                 }
             }
             if !progressed {
-                return inlined;
+                break;
             }
         }
+        records
     }
+}
 
+/// The read-only half of the inliner: deciding what can be inlined.
+struct Planner<'m> {
+    program: &'m OptimizedProgram,
+}
+
+impl<'m> Planner<'m> {
     /// Finds all compute units that could be potentially inlined.
     fn find_inlinable(&self) -> Vec<Ref<ComputeUnit>> {
         // To be inlinable, the compute unit must meet these criteria:
@@ -81,42 +169,44 @@ impl<'m> Inliner<'m> {
             .compute_units
             .iter()
             .map(|(r, _)| r)
-            .filter(|r| self.sole_user(*r).is_some())
+            .filter(|r| self.sole_user(*r).is_ok())
             .collect()
     }
 
     /// Returns the one compute unit that uses `callee`, if there is exactly one use in total
     /// and the callee is not an entry point.
-    fn sole_user(&self, callee: Ref<ComputeUnit>) -> Option<Ref<ComputeUnit>> {
+    fn sole_user(&self, callee: Ref<ComputeUnit>) -> Result<Ref<ComputeUnit>, InlineRejection> {
         if self
             .program
             .entry_points
             .iter()
             .any(|e| e.density_function == callee)
         {
-            return None;
+            return Err(InlineRejection::EntryPoint);
         }
-        let mut found = None;
+        let mut users = Vec::new();
         for (unit_ref, unit) in self.program.compute_units.iter() {
             let ComputeUnit::DensityFunction { density_inputs, .. } = unit;
             for (_, input) in density_inputs.iter() {
                 if input.density_function == callee {
-                    if found.is_some() {
-                        return None;
-                    }
-                    found = Some(unit_ref);
+                    users.push(unit_ref);
                 }
             }
         }
-        found.filter(|c| *c != callee)
+        match users[..] {
+            [] => Err(InlineRejection::Unused),
+            [user] if user == callee => Err(InlineRejection::SelfUse),
+            [user] => Ok(user),
+            _ => Err(InlineRejection::MultipleUses(users.len())),
+        }
     }
 
     /// The grid `unit` is consumed on. `None` if it has no consumers or they disagree.
-    fn consumer_grid(&self, unit: Ref<ComputeUnit>) -> Option<Grid> {
-        let mut grids: Vec<Grid> = Vec::new();
+    fn consumer_grid(&self, unit: Ref<ComputeUnit>) -> Option<GridInfo> {
+        let mut grids: Vec<GridInfo> = Vec::new();
         for e in &self.program.entry_points {
             if e.density_function == unit {
-                grids.push(Grid {
+                grids.push(GridInfo {
                     dimensions: e.dimensions,
                     scaled_origin: e.scaled_origin,
                     scaled_position: e.scaled_position,
@@ -127,7 +217,7 @@ impl<'m> Inliner<'m> {
             let ComputeUnit::DensityFunction { density_inputs, .. } = u;
             for (_, i) in density_inputs.iter() {
                 if i.density_function == unit {
-                    grids.push(Grid::of_input(i));
+                    grids.push(GridInfo::of_input(i));
                 }
             }
         }
@@ -135,32 +225,28 @@ impl<'m> Inliner<'m> {
         grids.iter().all(|g| *g == first).then_some(first)
     }
 
-    /// Placeholder for criterion 1 of `can_be_inlined` ("caller must not already be too complex").
+    /// Placeholder for criterion 1 of `plan` ("caller must not already be too complex").
     /// Skipped for now.
     fn caller_too_complex(&self, _caller: &ComputeUnit) -> bool {
         false
     }
 
-    /// Determines if the callee can be inlined into the caller.
-    fn can_be_inlined(&self, caller: Ref<ComputeUnit>, callee: Ref<ComputeUnit>) -> bool {
-        // Assumes the callee is already determined to be inlinable (see `find_inlinable`);
-        // that is re-verified inside `plan` since it is cheap and protects `inline`.
-        // Now the caller must be checked if it can inline the callee:
-        // 1. The caller must not already be too complex. (skipped for now)
-        // 2. The caller and callee must have an identity index mapping (None).
-        // 3. The caller and callee must have the same output shape.
-        // Additionally (needed for correctness of the generated call):
-        // 4. The callee is read from a single function of the caller. If it is read more than
-        //    once there, `inline` computes it once into a variable at the top of that function.
-        // 5. The caller function that reads it has a signature the callee can be called with.
-        self.plan(caller, callee).is_some()
-    }
-
-    fn plan(&self, caller: Ref<ComputeUnit>, callee: Ref<ComputeUnit>) -> Option<InlinePlan> {
-        if caller == callee || self.sole_user(callee) != Some(caller) {
-            return None;
-        }
-        let caller_unit = self.program.compute_units.try_get(caller)?;
+    /// Determines if the callee can be inlined into its (sole) caller.
+    ///
+    /// The callee must be inlinable at all (see `find_inlinable`); that is re-verified here since
+    /// it is cheap and protects `inline`. Then the caller is checked:
+    /// 1. The caller must not already be too complex. (skipped for now)
+    /// 2. The caller and callee must have an identity index mapping (None).
+    /// 3. The caller and callee must have the same output shape.
+    /// Additionally (needed for correctness of the generated call):
+    /// 4. The callee is read from a single function of the caller. If it is read more than
+    ///    once there, `inline` computes it once into a variable at the top of that function.
+    /// 5. The caller function that reads it has a signature the callee can be called with.
+    ///
+    /// Returns the first failing criterion, in the order checked here.
+    fn plan(&self, callee: Ref<ComputeUnit>) -> Result<InlinePlan, InlineRejection> {
+        let caller = self.sole_user(callee)?;
+        let caller_unit = &self.program.compute_units[caller];
         let ComputeUnit::DensityFunction {
             function: caller_fn,
             density_inputs,
@@ -170,22 +256,26 @@ impl<'m> Inliner<'m> {
 
         // 1. complexity
         if self.caller_too_complex(caller_unit) {
-            return None;
+            return Err(InlineRejection::CallerTooComplex);
         }
 
-        // The caller's single input that points at the callee.
-        let mut matching = density_inputs
+        // The caller's single input that points at the callee (`sole_user` counted exactly one).
+        let (input_ref, input) = density_inputs
             .iter()
-            .filter(|(_, i)| i.density_function == callee);
-        let (input_ref, input) = matching.next()?;
-        if matching.next().is_some() {
-            return None;
-        }
+            .find(|(_, i)| i.density_function == callee)
+            .expect("sole user has no input pointing at the callee");
 
         // 3. same output shape: what the caller reads must be the grid the caller itself is
         //    consumed on.
-        if self.consumer_grid(caller)? != Grid::of_input(input) {
-            return None;
+        let caller_grid = self
+            .consumer_grid(caller)
+            .ok_or(InlineRejection::CallerGridAmbiguous)?;
+        let input_grid = GridInfo::of_input(input);
+        if caller_grid != input_grid {
+            return Err(InlineRejection::GridMismatch {
+                caller: caller_grid,
+                input: input_grid,
+            });
         }
 
         // 2 + 4. every read is un-indexed, and all reads are in one function (the call, or the
@@ -193,20 +283,20 @@ impl<'m> Inliner<'m> {
         let mut reads = 0;
         let mut site = None;
         for f in std::iter::once(*caller_fn).chain(helper_functions.iter().copied()) {
-            let func = self.program.functions.try_get(f)?;
+            let func = &self.program.functions[f];
             let (identity, indexed) = count_density_uses(&func.body, input_ref);
             if indexed > 0 {
-                return None;
+                return Err(InlineRejection::IndexedRead { function: f });
             }
             if identity > 0 {
                 if site.is_some() {
-                    return None;
+                    return Err(InlineRejection::ReadInSeveralFunctions);
                 }
                 site = Some(f);
             }
             reads += identity;
         }
-        let site = site?;
+        let site = site.ok_or(InlineRejection::NotRead)?;
 
         // 5. the call is made with the site function's own parameters, forwarded unchanged
         //    (identity mapping means the callee sees the same index/position), so the
@@ -224,23 +314,23 @@ impl<'m> Inliner<'m> {
         //     }
         // }
 
-        Some(InlinePlan {
+        Ok(InlinePlan {
+            caller,
             input: input_ref,
             site,
             reads,
         })
     }
+}
 
+impl<'m> Inliner<'m> {
     /// Inlines the callee into the caller.
     ///
-    /// Must only be called when `can_be_inlined(caller, callee)` returned true (panics otherwise).
-    /// The callee's function becomes a helper function of the caller, the caller's read of the
-    /// callee becomes a call to it, and the callee compute unit is removed from the program.
-    fn inline(&mut self, caller: Ref<ComputeUnit>, callee: Ref<ComputeUnit>) {
-        let plan = self
-            .plan(caller, callee)
-            .expect("inline called for a pair that can_be_inlined rejects");
-
+    /// `plan` must be the current `plan(callee)`. The callee's function becomes a helper
+    /// function of the caller, the caller's read of the callee becomes a call to it, and the
+    /// callee compute unit is removed from the program.
+    fn inline(&mut self, callee: Ref<ComputeUnit>, plan: InlinePlan, round: usize) -> InlineRecord {
+        let caller = plan.caller;
         let callee_unit = self
             .program
             .compute_units
@@ -366,6 +456,16 @@ impl<'m> Inliner<'m> {
             replaced, plan.reads,
             "every read of the inlined density must be replaced"
         );
+
+        InlineRecord {
+            round,
+            caller,
+            callee,
+            callee_name: self.program.functions[callee_fn].canonical_name.clone(),
+            callee_function: callee_fn,
+            site: plan.site,
+            reads: plan.reads,
+        }
     }
 }
 
