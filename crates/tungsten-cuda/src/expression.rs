@@ -25,6 +25,7 @@ pub fn const_to_expression(e: &ConstExpr) -> Expression {
         ConstExpr::Constant(r) => Expression::Constant(*r),
         ConstExpr::Float(v) => Expression::Float(*v),
         ConstExpr::Double(v) => Expression::Double(*v),
+        ConstExpr::Byte(v) => Expression::Byte(*v),
         ConstExpr::Int(v) => Expression::Int(*v),
         ConstExpr::Long(v) => Expression::Long(*v),
         ConstExpr::Bool(v) => Expression::Bool(*v),
@@ -52,13 +53,14 @@ pub fn const_to_expression(e: &ConstExpr) -> Expression {
 }
 
 /// Converts `value` (of derived type `from`) for a sink of type `to`: unchanged if the types agree
-/// or the sink isn't a scalar, `tw::f2i32`/`tw::f2i64` for float -> int (saturating, NaN -> 0),
+/// or the sink isn't a scalar, `tw::f2i8`/`tw::f2i32`/`tw::f2i64` for float -> int (saturating, NaN -> 0),
 /// otherwise a C cast.
 pub fn coerce(value: cuda::Expression, from: Option<&VariableType>, to: &VariableType) -> cuda::Expression {
     if from == Some(to) || !is_scalar(to) {
         return value;
     }
     match (from, IntWidth::of(to)) {
+        (Some(f), Some(IntWidth::I8)) if is_float(f) => C::call("tw::f2i8", vec![value]),
         (Some(f), Some(IntWidth::I32)) if is_float(f) => C::call("tw::f2i32", vec![value]),
         (Some(f), Some(IntWidth::I64)) if is_float(f) => C::call("tw::f2i64", vec![value]),
         _ => C::cast(device_type(to), value),
@@ -71,9 +73,23 @@ fn wrapping(width: IntWidth, op: cuda::BinaryOperator, a: cuda::Expression, b: c
     C::cast(width.signed(), C::binary(op, u(a), u(b)))
 }
 
+/// An `I8` literal: `(signed char)v`.
+fn byte_literal(v: i8) -> cuda::Expression {
+    C::cast(cuda::Type::SignedChar, C::IntLit(v as i32))
+}
+
+/// C++ promotes `signed char` operands to `int`; narrows an `I8` result back.
+fn narrow(width: Option<IntWidth>, e: cuda::Expression) -> cuda::Expression {
+    match width {
+        Some(IntWidth::I8) => C::cast(cuda::Type::SignedChar, e),
+        _ => e,
+    }
+}
+
 /// Value of an integer literal, if `e` is one.
 fn int_literal(e: &Expression) -> Option<i64> {
     match e {
+        Expression::Byte(v) => Some(*v as i64),
         Expression::Int(v) => Some(*v as i64),
         Expression::Long(v) => Some(*v),
         _ => None,
@@ -105,6 +121,7 @@ impl<'a> FunctionConverter<'a> {
             Expression::Variable(r) => C::Name(self.declare_var(*r)),
             Expression::Float(v) => C::FloatLit(*v),
             Expression::Double(v) => C::DoubleLit(*v),
+            Expression::Byte(v) => byte_literal(*v),
             Expression::Int(v) => C::IntLit(*v),
             Expression::Long(v) => C::LongLit(*v),
             Expression::Bool(v) => C::BoolLit(*v),
@@ -231,12 +248,13 @@ impl<'a> FunctionConverter<'a> {
             B::Add | B::Subtract | B::Multiply | B::Divide => {
                 let r = self.convert_expression(right);
                 match operand_kind(lt.as_ref(), rt.as_ref()) {
-                    OperandKind::Integer(_) if op == B::Divide => {
-                        if self.config.debug_checks {
+                    OperandKind::Integer(width) if op == B::Divide => {
+                        let quotient = if self.config.debug_checks {
                             C::call("TW_CHECK_DIV", vec![l, r, self.location()])
                         } else {
                             C::binary(cuda_op, l, r)
-                        }
+                        };
+                        narrow(Some(width), quotient)
                     }
                     OperandKind::Integer(width) => wrapping(width, cuda_op, l, r),
                     OperandKind::Plain => C::binary(cuda_op, l, r),
@@ -268,13 +286,15 @@ impl<'a> FunctionConverter<'a> {
                 };
                 match op {
                     // Arithmetic shift of a signed value; defined in C++20.
-                    B::ShiftRight => C::binary(cuda_op, l, count),
+                    B::ShiftRight => narrow(Some(width), C::binary(cuda_op, l, count)),
                     _ => C::cast(width.signed(), C::binary(cuda_op, C::cast(width.unsigned(), l), count)),
                 }
             }
             _ => {
                 let r = self.convert_expression(right);
-                C::binary(cuda_op, l, r)
+                let bitwise = matches!(op, B::BitAnd | B::BitOr | B::BitXor);
+                let result = C::binary(cuda_op, l, r);
+                if bitwise { narrow(lt.as_ref().and_then(IntWidth::of), result) } else { result }
             }
         }
     }
@@ -298,6 +318,7 @@ impl<'a> FunctionConverter<'a> {
         match op {
             UnaryOperator::Negate => match t.as_ref().and_then(IntWidth::of) {
                 Some(width) => match int_literal(operand) {
+                    Some(v) if width == IntWidth::I8 => byte_literal((v as i8).wrapping_neg()),
                     Some(v) if width == IntWidth::I32 => C::IntLit((v as i32).wrapping_neg()),
                     Some(v) => C::LongLit(v.wrapping_neg()),
                     None => {
@@ -311,13 +332,16 @@ impl<'a> FunctionConverter<'a> {
                 None => C::unary(cuda::UnaryOperator::Negate, self.convert_expression(operand)),
             },
             // IR `!` on an integer is bitwise not.
-            UnaryOperator::Not => C::unary(
-                if t.as_ref().is_some_and(is_integer) {
-                    cuda::UnaryOperator::BitNot
-                } else {
-                    cuda::UnaryOperator::Not
-                },
-                self.convert_expression(operand),
+            UnaryOperator::Not => narrow(
+                t.as_ref().and_then(IntWidth::of),
+                C::unary(
+                    if t.as_ref().is_some_and(is_integer) {
+                        cuda::UnaryOperator::BitNot
+                    } else {
+                        cuda::UnaryOperator::Not
+                    },
+                    self.convert_expression(operand),
+                ),
             ),
             // Samplers are pointers already.
             UnaryOperator::Ref(_) if t.as_ref().is_some_and(is_pointer) => self.convert_expression(operand),

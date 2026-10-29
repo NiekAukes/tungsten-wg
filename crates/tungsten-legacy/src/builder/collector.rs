@@ -52,7 +52,7 @@ impl<'m> Collector<'m> {
 
     pub fn expr(&mut self, e: &Expression<'m>) {
         match e {
-            E::Variable(_) | E::Float(_) | E::Double(_) | E::Int(_) | E::Long(_) | E::Bool(_) => {}
+            E::Variable(_) | E::Float(_) | E::Double(_) | E::Byte(_) | E::Int(_) | E::Long(_) | E::Bool(_) => {}
             E::FunctionCall {
                 function,
                 parameters,

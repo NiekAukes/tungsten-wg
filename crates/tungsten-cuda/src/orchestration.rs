@@ -573,17 +573,11 @@ fn orchestration_source(program: &OptimizedProgram, interface: &Interface, confi
             methods.push(format!("    // wave {}", w));
             for inst in wave {
                 let shape = launch_shape(inst.dimensions, config.block_size);
-                let (gx, gy, gz) = shape.grid;
-                let (bx, by, bz) = shape.block;
                 methods.push(format!(
-                    "    dev::{}<<<dim3({}, {}, {}), dim3({}, {}, {}), 0, s.stream>>>(o, s.slab, s.auto_constants, s.host_consts);",
+                    "    dev::{}<<<{}, {}, 0, s.stream>>>(o, s.slab, s.auto_constants, s.host_consts);",
                     kernel_symbol(config, interface, inst),
-                    gx,
-                    gy,
-                    gz,
-                    bx,
-                    by,
-                    bz
+                    shape.blocks,
+                    shape.threads
                 ));
                 methods.push("    TUNGSTEN_CUDA_CHECK(cudaGetLastError());".into());
             }

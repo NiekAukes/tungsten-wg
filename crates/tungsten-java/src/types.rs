@@ -14,6 +14,7 @@ pub fn convert_type(t: &VariableType) -> java::Type {
         VariableType::Pos3 => J::class("Pos3"),
         VariableType::F32 => J::Float,
         VariableType::F64 => J::Double,
+        VariableType::I8 => J::Byte,
         VariableType::I32 => J::Int,
         VariableType::I64 => J::Long,
         VariableType::Bool => J::Boolean,
@@ -50,6 +51,7 @@ pub fn is_object(t: &VariableType) -> bool {
 pub fn boxed_class(t: &java::Type) -> &'static str {
     match t {
         java::Type::Boolean => "Boolean",
+        java::Type::Byte => "Byte",
         java::Type::Int => "Integer",
         java::Type::Long => "Long",
         java::Type::Float => "Float",
@@ -62,6 +64,7 @@ pub fn boxed_class(t: &java::Type) -> &'static str {
 pub fn holder_class(t: &java::Type) -> &'static str {
     match t {
         java::Type::Boolean => "BoolRef",
+        java::Type::Byte => "ByteRef",
         java::Type::Int => "IntRef",
         java::Type::Long => "LongRef",
         java::Type::Float => "FloatRef",
@@ -106,6 +109,7 @@ pub fn convert_binary_op(op: opt::BinaryOperator) -> java::BinaryOperator {
 /// The literal `v` in Java type `t` (used for `bool as <numeric>`).
 pub fn numeric_literal(t: &java::Type, v: i32) -> java::Expression {
     match t {
+        java::Type::Byte => java::Expression::cast(java::Type::Byte, java::Expression::IntLit(v)),
         java::Type::Long => java::Expression::LongLit(v as i64),
         java::Type::Float => java::Expression::FloatLit(v as f32),
         java::Type::Double => java::Expression::DoubleLit(v as f64),

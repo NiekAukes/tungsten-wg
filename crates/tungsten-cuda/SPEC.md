@@ -241,6 +241,7 @@ needs C++17.
 | IR `VariableType`          | Device C++ type                          | Public mirror (`orchestration.h`) |
 | -------------------------- | ---------------------------------------- | --------------------------------- |
 | `F32` / `F64`              | `float` / `double`                       | same                              |
+| `I8`                       | `signed char`                            | same                              |
 | `I32` / `I64`              | `int` / `long long`                      | same                              |
 | `Bool`                     | `bool`                                   | `bool`                            |
 | `Vec3`                     | `double3`                                | `Vec3 { double x, y, z; }`        |
@@ -287,7 +288,7 @@ Extern arguments are cast to every declared parameter type (like Java), not only
 
 ### 7.2 Integer semantics (Java semantics, both profiles)
 
-Java wraps on overflow. In C++ signed overflow is UB and NVVM exploits it. On `I32` (`U` =
+Java wraps on overflow. In C++ signed overflow is UB and NVVM exploits it. On `I8` and `I32` (`U` =
 `unsigned`) and `I64` (`U` = `unsigned long long`):
 
 | IR op                | Emitted                                                     |
@@ -302,27 +303,34 @@ Java wraps on overflow. In C++ signed overflow is UB and NVVM exploits it. On `I
 | `Not` on integer     | `~a`                                                        |
 | `Not` on bool        | `!a`                                                        |
 
-- `M` is 31 for `I32` and 63 for `I64`. When the shift count is an integer literal, the mask is
+- `M` is 31 for `I8` and `I32` and 63 for `I64`. When the shift count is an integer literal, the mask is
   folded at codegen time (`x << 33` on `I32` emits `x << 1`) and no `&` is emitted.
 - The operation's width comes from the derived operand types. If either side is `I64` the 64-bit
   form is used. If neither type can be derived, the plain operator is emitted and the converter
-  records a warning.
+  records a warning. Otherwise `I32` wins over `I8`.
+- `I8` (`T` = `signed char`) is computed in 32 bits, as C++ promotes it, and every integer result
+  is cast back to `signed char`: the forms above, plus `(T)(a / b)`, `(T)(a >> (b & M))`,
+  `(T)(a & b)` (and `|`, `^`) and `(T)(~a)`. `I8` literals are emitted as `(signed char)v`.
 - `I32 ± Bool` (allowed by `derive_binop_type`) works without casts: `bool` converts to `unsigned`.
 - Converting back from unsigned to signed is modular in C++20.
 - **Known divergence from the Rust backend:** `tungsten-rust` maps `LogicalShiftRight` to `>>` on
   signed values (arithmetic). CUDA follows Java (`>>>`). Differential validation will disagree on
   negative operands until the Rust backend is fixed.
+- **Known divergence from the Rust backend:** shifts of an `I8` by 8 or more overflow in Rust
+  (panic in debug, count masked by 7 in release). CUDA and Java mask by 31 on the promoted `int`.
 
 ### 7.3 Casts (`ExplicitCast` and inserted casts)
 
 | From → To                        | Emitted                                                                 |
 | -------------------------------- | ----------------------------------------------------------------------- |
+| `F64`/`F32` → `I8`               | `tw::f2i8(x)`: saturating to [-128, 127], NaN → 0 (Rust `as i8`)     |
 | `F64`/`F32` → `I32`              | `tw::f2i32(x)`: saturating, NaN → 0 (Java/Rust `as` semantics)       |
 | `F64`/`F32` → `I64`              | `tw::f2i64(x)`: saturating, NaN → 0                                  |
 | integer → integer, int → float, `F64` ↔ `F32`, `Bool` → int | `(T)(x)`                          |
 
-`tw::f2i32` / `tw::f2i64` are runtime functions, `__host__ __device__ constexpr`, overloaded for
-`float` and `double`. In device code the runtime must lower them to `__double2int_rz`,
+`tw::f2i8`, `tw::f2i32` and `tw::f2i64` are runtime functions, `__host__ __device__ constexpr`,
+overloaded for `float` and `double`. `tw::f2i8` is `tw::f2i32` clamped to [-128, 127] (Java
+`(byte)` would wrap instead). In device code the runtime must lower them to `__double2int_rz`,
 `__double2ll_rz`, `__float2int_rz` and `__float2ll_rz`: PTX `cvt.rzi` saturates and maps NaN to 0.
 For constant evaluation the runtime uses a portable constexpr implementation.
 (Emitting the intrinsics directly is not possible because constant initializers are evaluated at
@@ -466,14 +474,15 @@ __device__ void <kernel>_body(int3 local, double3 origin, char* buffers,
     tw::buffer<R>(buffers, BufferLayout::<buffer_field>)[tw::index(p)] = r;
 }
 
-// Wrapper: native 3D launch for v1.
-extern "C" __global__ void __launch_bounds__(BX * BY * BZ)
+// Wrapper: 1D launch; decodes the linear id into `local`, x fastest.
+extern "C" __global__ void __launch_bounds__(T)
 <kernel_symbol>(double3 origin, char* buffers,
                 const AutoConsts* __restrict__ auto_constants,
                 const DeviceHostConsts* __restrict__ host_consts) {
-    <kernel>_body(int3{(int)(blockIdx.x * blockDim.x + threadIdx.x),
-                       (int)(blockIdx.y * blockDim.y + threadIdx.y),
-                       (int)(blockIdx.z * blockDim.z + threadIdx.z)},
+    const int i = (int)(blockIdx.x * blockDim.x + threadIdx.x);
+    const int yz = i / DX;
+    const int z = yz / DY;
+    <kernel>_body(int3{i - yz * DX, yz - z * DY, z},
                   origin, buffers, auto_constants, host_consts);
 }
 ```
@@ -487,24 +496,25 @@ extern "C" __global__ void __launch_bounds__(BX * BY * BZ)
   `idx = x + DX * (y + DY * z)`. It is defined once in the runtime (`tw::index`,
   `tw::make_position`) and must match the Rust runtime's `index()` / `iter_3d`. `threadIdx.x` maps
   to `x`, so consecutive threads store to consecutive addresses (coalesced).
+- Ids past the element count decode to `z >= DZ`, so the body's bounds check covers them.
 - An instance with more than `i32::MAX` elements panics.
 - `(1,1,1)` instances are ordinary kernels (one block, one thread). Fusion will remove that
   overhead later.
 
 ### 9.3 Launch shape (`launch.rs`)
 
-The block shape is computed per instance from its dimensions `(dx, dy, dz)` and `B = block_size`:
+Every instance is a 1D launch, computed from its element count `N = dx·dy·dz` and
+`B = block_size`:
 
 ```
-bx = min(pow2_ceil(dx), B)
-by = min(pow2_ceil(dy), B / bx)
-bz = min(pow2_ceil(dz), B / (bx * by))
-grid = (ceil(dx / bx), ceil(dy / by), ceil(dz / bz))
+T = min(N, B)          // threads per block
+blocks = ceil(N / T)
 ```
 
-The rule is deterministic, so both sides compute the same shape from the same function. Threads
-per block never exceed `B`, and `__launch_bounds__(bx*by*bz)` is emitted. Grid y/z above 65535
-panics; with world-gen sizes this doesn't happen.
+A 3D block shape would pad narrow dimensions to a power of two (a 5×49×5 instance as (8,16,1)
+blocks runs 65 warps where 39 do); the FP64 units pay for those dead lanes. The rule is
+deterministic, so both sides compute the same shape from the same function. `__launch_bounds__(T)`
+is emitted, and the host launches `<<<blocks, T>>>`.
 
 ### 9.4 Wave fusion (future; the design must allow it)
 
@@ -516,12 +526,10 @@ Plan, which needs no changes to bodies:
 
 - `generate_kernel_of` (or a CUDA-specific entry point taking `Vec<Instance>`) emits one
   `extern "C" __global__` per fused group.
-- The fused kernel uses a **1D** grid with `T` threads per block, where `T` is the largest member
-  shape's thread count. Each member `m` owns a contiguous `blockIdx.x` range
-  `[start_m, start_m + gx·gy·gz)`. Inside its range the kernel turns the block-linear id into 3D
-  block coordinates of `m`'s grid, and the thread id `t < bx·by·bz` into
-  `(t % bx, t / bx % by, t / (bx·by))`. Threads with `t >= bx·by·bz` return. Then it calls
-  `m`'s `_body` with the resulting `local`.
+- The fused kernel uses a 1D grid with `T` threads per block, where `T` is the largest member's
+  thread count. Each member `m` owns a contiguous `blockIdx.x` range `[start_m, start_m + blocks_m)`.
+  Inside its range the kernel computes the member-local linear id and decodes it into `local`
+  exactly like the single-instance wrapper (§9.2), then calls `m`'s `_body`.
 - Ranges and member shapes are compile-time constants, so dispatch is a chain of comparisons on
   `blockIdx.x`.
 - The host launches one fused kernel per group instead of one per instance. `waves_for` pruning
@@ -547,7 +555,7 @@ function per `(unit, dimensions)` (`interface.density_fn`), helpers once each
   A plain host `constexpr` aggregate can't be indexed dynamically from device code.
 - Initializers use the same lowering as expressions (§7) and must be constant expressions. The
   runtime contract therefore requires constexpr-constructible extern types, `constexpr`
-  `tw::f2i32`/`tw::f2i64`, and constexpr `operator`s for vector types.
+  `tw::f2i8`/`tw::f2i32`/`tw::f2i64`, and constexpr `operator`s for vector types.
 - **Verify during implementation:** `__device__ constexpr` aggregates whose initializers reference
   other such constants, under both nvcc and NVRTC. Fallback: emit aggregates as
   `__device__ const` with the initializer fully folded by the backend.
@@ -747,7 +755,8 @@ reference), not vanilla Java directly.
 - `template <class T, int N> struct tw::Array { T v[N]; constexpr T& operator[](int);
   constexpr const T& operator[](int) const; }`: trivially copyable aggregate.
 - `tw::lval(T&& x) -> T&`.
-- `tw::f2i32(float|double) -> int`, `tw::f2i64(float|double) -> long long`: `constexpr __host__
+- `tw::f2i8(float|double) -> signed char`, `tw::f2i32(float|double) -> int`,
+  `tw::f2i64(float|double) -> long long`: `constexpr __host__
   __device__`, saturating, NaN → 0. On device they must lower to the `__*2int_rz` / `__*2ll_rz`
   intrinsics.
 - `tw::align_up(unsigned long long, unsigned long long)`: constexpr.
@@ -929,6 +938,6 @@ whose exact-profile port isn't finished.
 | In-flight calls | Allowed, stream-ordered. |
 | Profile selection | Backend config only (generation time). |
 | Stream/device | Own non-blocking stream, current device. |
-| Launch | Per-instance 3D blocks. |
+| Launch | Per-instance 1D grid, linear id decoded to `(x, y, z)`. |
 | ConstructExtern | C++20 designated initializers. |
 | Unsupported IR | Panic, like Rust/Java. |

@@ -462,6 +462,7 @@ fn literal(l: &Literal) -> (String, String) {
     match l {
         Literal::Float(x) => (format!("{}f", round(*x as f64)), format!("{x:?}f")),
         Literal::Double(x) => (round(*x), format!("{x:?}")),
+        Literal::Byte(x) => (format!("{x}b"), format!("{x}b")),
         Literal::Int(x) => (x.to_string(), x.to_string()),
         Literal::Long(x) => (format!("{x}L"), format!("{x}L")),
         Literal::Bool(x) => (x.to_string(), x.to_string()),

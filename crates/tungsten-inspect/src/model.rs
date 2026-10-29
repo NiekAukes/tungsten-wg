@@ -426,6 +426,7 @@ pub struct DensityReadInfo {
 pub enum Literal {
     Float(f32),
     Double(f64),
+    Byte(i8),
     Int(i32),
     Long(i64),
     Bool(bool),

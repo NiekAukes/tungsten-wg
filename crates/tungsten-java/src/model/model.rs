@@ -6,6 +6,7 @@ Owned and lifetime-free; printed by `super::codegen::JavaCodeGenerator`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     Boolean,
+    Byte,
     Int,
     Long,
     Float,
@@ -21,7 +22,7 @@ impl Type {
     }
 
     pub fn is_primitive(&self) -> bool {
-        matches!(self, Type::Boolean | Type::Int | Type::Long | Type::Float | Type::Double)
+        matches!(self, Type::Boolean | Type::Byte | Type::Int | Type::Long | Type::Float | Type::Double)
     }
 }
 

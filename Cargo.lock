@@ -206,6 +206,7 @@ dependencies = [
  "tungsten-codegen",
  "tungsten-interface",
  "tungsten-ir",
+ "tungsten-legacy",
 ]
 
 [[package]]

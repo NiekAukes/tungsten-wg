@@ -278,6 +278,7 @@ fn walk_expr(e: &mut Expression, v: &mut impl RefVisitor) {
         Expression::ExplicitCast { expr, .. } => walk_expr(expr, v),
         Expression::Float(_)
         | Expression::Double(_)
+        | Expression::Byte(_)
         | Expression::Int(_)
         | Expression::Long(_)
         | Expression::Bool(_) => {}
@@ -302,6 +303,7 @@ fn walk_const_expr(e: &mut ConstExpr, v: &mut impl RefVisitor) {
         ConstExpr::Construct { args, .. } => args.iter_mut().for_each(|a| walk_const_expr(a, v)),
         ConstExpr::Float(_)
         | ConstExpr::Double(_)
+        | ConstExpr::Byte(_)
         | ConstExpr::Int(_)
         | ConstExpr::Long(_)
         | ConstExpr::Bool(_) => {}

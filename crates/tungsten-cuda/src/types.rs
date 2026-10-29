@@ -19,6 +19,7 @@ pub fn device_type(t: &VariableType) -> cuda::Type {
         VariableType::Pos3 => T::named("int3"),
         VariableType::F32 => T::Float,
         VariableType::F64 => T::Double,
+        VariableType::I8 => T::SignedChar,
         VariableType::I32 => T::Int,
         VariableType::I64 => T::LongLong,
         VariableType::Bool => T::Bool,
@@ -38,10 +39,12 @@ pub fn public_type(t: &VariableType) -> Option<cuda::Type> {
         VariableType::Pos3 => T::named("Pos3"),
         VariableType::F32 => T::Float,
         VariableType::F64 => T::Double,
+        VariableType::I8 => T::SignedChar,
         VariableType::I32 => T::Int,
         VariableType::I64 => T::LongLong,
         VariableType::Bool => T::Bool,
         VariableType::Array(element, n) => T::CArray(Box::new(public_type(element)?), *n),
+        VariableType::Extern(name) => T::named(&format!("tw::{}", cuda_sanitize(name))),
         _ => return None,
     })
 }
@@ -49,19 +52,27 @@ pub fn public_type(t: &VariableType) -> Option<cuda::Type> {
 /// Owned type of a permutation table field in `AutoConsts` (parameters point to it instead).
 pub fn auto_const_type(table: &opt::PermutationTableInput) -> cuda::Type {
     match table {
-        opt::PermutationTableInput::PerlinNoise { .. } => cuda::Type::named(PERLIN_NOISE_SAMPLER_TYPE),
+        opt::PermutationTableInput::PerlinNoise { .. } => {
+            cuda::Type::named(PERLIN_NOISE_SAMPLER_TYPE)
+        }
         opt::PermutationTableInput::Base3DNoise => cuda::Type::named(BASE3D_NOISE_SAMPLER_TYPE),
     }
 }
 
 /// Element type of a unit's buffer: the return type of its main function.
-pub fn unit_return_type(program: &opt::OptimizedProgram, cu: opt::Ref<opt::ComputeUnit>) -> &VariableType {
+pub fn unit_return_type(
+    program: &opt::OptimizedProgram,
+    cu: opt::Ref<opt::ComputeUnit>,
+) -> &VariableType {
     let opt::ComputeUnit::DensityFunction { function, .. } = &program.compute_units[cu];
     &program.functions[*function].return_type
 }
 
 /// The program's density input for `r`; inputs live in the units, so every unit is searched.
-pub fn find_density_input(program: &opt::OptimizedProgram, r: opt::Ref<opt::DensityInput>) -> &opt::DensityInput {
+pub fn find_density_input(
+    program: &opt::OptimizedProgram,
+    r: opt::Ref<opt::DensityInput>,
+) -> &opt::DensityInput {
     for (_, cu) in program.compute_units.iter() {
         let opt::ComputeUnit::DensityFunction { density_inputs, .. } = cu;
         if density_inputs.contains(r) {
@@ -73,7 +84,10 @@ pub fn find_density_input(program: &opt::OptimizedProgram, r: opt::Ref<opt::Dens
 
 /// Whether the device representation of `t` is a pointer (samplers).
 pub fn is_pointer(t: &VariableType) -> bool {
-    matches!(t, VariableType::PermutationTable | VariableType::InterpolatedNoiseSampler)
+    matches!(
+        t,
+        VariableType::PermutationTable | VariableType::InterpolatedNoiseSampler
+    )
 }
 
 pub fn is_vector(t: &VariableType) -> bool {
@@ -85,17 +99,27 @@ pub fn is_float(t: &VariableType) -> bool {
 }
 
 pub fn is_integer(t: &VariableType) -> bool {
-    matches!(t, VariableType::I32 | VariableType::I64)
+    matches!(t, VariableType::I8 | VariableType::I32 | VariableType::I64)
 }
 
 /// Types that C-style casts convert between.
 pub fn is_scalar(t: &VariableType) -> bool {
-    matches!(t, VariableType::F32 | VariableType::F64 | VariableType::I32 | VariableType::I64 | VariableType::Bool)
+    matches!(
+        t,
+        VariableType::F32
+            | VariableType::F64
+            | VariableType::I8
+            | VariableType::I32
+            | VariableType::I64
+            | VariableType::Bool
+    )
 }
 
 /// Width of an integer operation with Java semantics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IntWidth {
+    /// Computed in 32 bits (C++ promotes `signed char`), truncated to 8 bits.
+    I8,
     I32,
     I64,
 }
@@ -103,6 +127,7 @@ pub enum IntWidth {
 impl IntWidth {
     pub fn of(t: &VariableType) -> Option<IntWidth> {
         match t {
+            VariableType::I8 => Some(IntWidth::I8),
             VariableType::I32 => Some(IntWidth::I32),
             VariableType::I64 => Some(IntWidth::I64),
             _ => None,
@@ -111,6 +136,7 @@ impl IntWidth {
 
     pub fn signed(self) -> cuda::Type {
         match self {
+            IntWidth::I8 => cuda::Type::SignedChar,
             IntWidth::I32 => cuda::Type::Int,
             IntWidth::I64 => cuda::Type::LongLong,
         }
@@ -118,6 +144,7 @@ impl IntWidth {
 
     pub fn unsigned(self) -> cuda::Type {
         match self {
+            IntWidth::I8 => cuda::Type::Unsigned,
             IntWidth::I32 => cuda::Type::Unsigned,
             IntWidth::I64 => cuda::Type::UnsignedLongLong,
         }
@@ -126,7 +153,7 @@ impl IntWidth {
     /// Shift counts are taken modulo the width, as in Java.
     pub fn shift_mask(self) -> i64 {
         match self {
-            IntWidth::I32 => 31,
+            IntWidth::I8 | IntWidth::I32 => 31,
             IntWidth::I64 => 63,
         }
     }
@@ -154,6 +181,9 @@ pub fn operand_kind(left: Option<&VariableType>, right: Option<&VariableType>) -
     }
     if known.clone().any(|t| **t == VariableType::I32) {
         return OperandKind::Integer(IntWidth::I32);
+    }
+    if known.clone().any(|t| **t == VariableType::I8) {
+        return OperandKind::Integer(IntWidth::I8);
     }
     if left.is_none() && right.is_none() {
         return OperandKind::Unknown;

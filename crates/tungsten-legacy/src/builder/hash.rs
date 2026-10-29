@@ -210,6 +210,10 @@ impl Fingerprint {
                 format!("{:?}", to).hash(&mut self.0);
                 self.expr(expr);
             }
+            E::Byte(x) => {
+                self.tag(18);
+                self.0.write_i8(*x);
+            }
         }
     }
 }

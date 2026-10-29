@@ -348,3 +348,51 @@ fn inspects_small_program() {
     );
     assert!(summary.contains("added: (none)"), "{summary}");
 }
+
+/// A 4x4x4 unit returning `I8`: byte constants, wrapping arithmetic, bit operations and casts.
+fn build_byte_program<'m>(arena: &'m Bump) -> SPMT<'m> {
+    let b = Builder::new(arena).named("minecraft:bytes").returns(VariableType::I8);
+    let table = b.constant(
+        "table",
+        VariableType::Array(Box::new(VariableType::I8), 3),
+        Expression::ArrayLiteral(vec![1i8.into(), (-2i8).into(), 127i8.into()]),
+    );
+    let a = b.local("a", VariableType::I8);
+    let wide = b.local("wide", VariableType::I32);
+    let d = b.local("d", VariableType::F64);
+    let mut b = b;
+    b.set_body(vec![
+        // 127 + 127 wraps
+        Statement::Assign { target: a, value: var(table).index(2i32) + 127i8 },
+        Statement::Assign { target: a, value: (-var(a)).bitand(var(a).shl(1i32)) },
+        Statement::Assign { target: wide, value: var(a).cast(VariableType::I32).bitand(255i32) },
+        Statement::Assign { target: d, value: 300.5f64.into() },
+        Statement::Assign { target: a, value: var(d).cast(VariableType::I8) },
+        Statement::Return(var(a) + var(wide).cast(VariableType::I8)),
+    ]);
+    let unit = b.finish_compute_unit();
+    SPMT {
+        density_functions: vec![unit],
+        functions: vec![],
+        main_density_functions: vec![MainDensityFunction {
+            density_function: unit,
+            dimensions: (4, 4, 4),
+            scaled_origin: (1.0, 1.0, 1.0),
+            scaled_position: (1.0, 1.0, 1.0),
+        }],
+    }
+}
+
+#[test]
+fn byte_buffers_and_literals() {
+    let arena = Bump::new();
+    let program = convert(&build_byte_program(&arena)).expect("conversion");
+    let i = inspect(&program, &InspectConfig::default()).inspection;
+    let entry = &i.entries[0];
+    for axis in [&entry.buffers.cpu, &entry.buffers.gpu] {
+        let out = axis.buffers.iter().find(|b| b.pinned).expect("entry output is pinned");
+        assert_eq!(out.bytes, 64, "4x4x4 bytes");
+    }
+    let ir = &i.functions.iter().find(|f| f.ir.contains("table")).expect("unit function").ir;
+    assert!(ir.contains("127b"), "missing byte literal in:\n{ir}");
+}

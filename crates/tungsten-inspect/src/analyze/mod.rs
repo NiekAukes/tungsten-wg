@@ -406,6 +406,7 @@ impl<'a> Ctx<'a> {
         Some(match t {
             VariableType::F32 => s.f32,
             VariableType::F64 => s.f64,
+            VariableType::I8 => s.i8,
             VariableType::I32 => s.i32,
             VariableType::I64 => s.i64,
             VariableType::Bool => s.bool,
@@ -581,6 +582,7 @@ pub(crate) fn expr_children(e: &Expression) -> Vec<&Expression> {
         | Expression::Variable(_)
         | Expression::Float(_)
         | Expression::Double(_)
+        | Expression::Byte(_)
         | Expression::Int(_)
         | Expression::Long(_)
         | Expression::Bool(_)
@@ -608,6 +610,7 @@ pub(crate) fn const_refs(e: &ConstExpr, out: &mut Vec<Ref<Constant>>) {
         ConstExpr::Construct { args, .. } => args.iter().for_each(|a| const_refs(a, out)),
         ConstExpr::Float(_)
         | ConstExpr::Double(_)
+        | ConstExpr::Byte(_)
         | ConstExpr::Int(_)
         | ConstExpr::Long(_)
         | ConstExpr::Bool(_) => {}

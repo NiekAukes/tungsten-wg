@@ -107,6 +107,7 @@ impl<'a> FunctionConverter<'a> {
             E::Variable(r) => self.function.variables[*r].t.clone(),
             E::Float(_) => VariableType::F32,
             E::Double(_) => VariableType::F64,
+            E::Byte(_) => VariableType::I8,
             E::Int(_) => VariableType::I32,
             E::Long(_) => VariableType::I64,
             E::Bool(_) => VariableType::Bool,

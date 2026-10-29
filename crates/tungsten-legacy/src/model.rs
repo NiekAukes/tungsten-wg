@@ -233,6 +233,7 @@ pub enum Expression<'m> {
     /// A literal value (e.g. number)
     Float(f32),
     Double(f64),
+    Byte(i8),
     Int(i32),
     Long(i64),
     Bool(bool),

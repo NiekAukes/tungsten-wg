@@ -63,6 +63,7 @@ pub fn type_string(t: &Type) -> String {
     match t {
         Type::Bool => "bool".into(),
         Type::Int => "int".into(),
+        Type::SignedChar => "signed char".into(),
         Type::LongLong => "long long".into(),
         Type::Unsigned => "unsigned".into(),
         Type::UnsignedLongLong => "unsigned long long".into(),

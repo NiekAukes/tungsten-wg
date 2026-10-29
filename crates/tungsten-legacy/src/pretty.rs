@@ -223,6 +223,9 @@ impl<'m> PrettyPrint for Expression<'m> {
                 let s = s.trim_end_matches('0').trim_end_matches('.').to_string();
                 p.push(&s);
             }
+            Expression::Byte(v) => {
+                write!(p.line, "{}b", v).unwrap();
+            }
             Expression::Int(v) => {
                 write!(p.line, "{}", v).unwrap();
             }

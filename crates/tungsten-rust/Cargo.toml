@@ -12,3 +12,6 @@ tungsten-codegen.workspace = true
 tungsten-interface.workspace = true
 bumpalo.workspace = true
 md5.workspace = true
+
+[dev-dependencies]
+tungsten-legacy.workspace = true

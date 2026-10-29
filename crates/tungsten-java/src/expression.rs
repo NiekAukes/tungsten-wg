@@ -23,6 +23,7 @@ pub fn const_to_expression(e: &ConstExpr) -> Expression {
         ConstExpr::Constant(r) => Expression::Constant(*r),
         ConstExpr::Float(v) => Expression::Float(*v),
         ConstExpr::Double(v) => Expression::Double(*v),
+        ConstExpr::Byte(v) => Expression::Byte(*v),
         ConstExpr::Int(v) => Expression::Int(*v),
         ConstExpr::Long(v) => Expression::Long(*v),
         ConstExpr::Bool(v) => Expression::Bool(*v),
@@ -54,7 +55,7 @@ fn is_vector(t: &Option<VariableType>) -> bool {
 }
 
 fn is_integer(t: &Option<VariableType>) -> bool {
-    matches!(t, Some(VariableType::I32 | VariableType::I64))
+    matches!(t, Some(VariableType::I8 | VariableType::I32 | VariableType::I64))
 }
 
 /// `(b ? 1 : 0)` in Java type `t`.
@@ -64,6 +65,11 @@ fn bool_to_number(b: java::Expression, t: &java::Type) -> java::Expression {
         then: Box::new(numeric_literal(t, 1)),
         other: Box::new(numeric_literal(t, 0)),
     }
+}
+
+/// Java promotes `byte` operands to `int`; narrows the result back when the IR type is `I8`.
+fn narrow_byte(e: java::Expression, t: &Option<VariableType>) -> java::Expression {
+    if *t == Some(VariableType::I8) { J::cast(java::Type::Byte, e) } else { e }
 }
 
 /// Converts `value` (of derived type `from`) for a sink of type `to`: unchanged if the types agree
@@ -96,6 +102,7 @@ impl<'a> FunctionConverter<'a> {
             Expression::Variable(r) => J::Name(self.declare_var(*r)),
             Expression::Float(v) => J::FloatLit(*v),
             Expression::Double(v) => J::DoubleLit(*v),
+            Expression::Byte(v) => numeric_literal(&java::Type::Byte, *v as i32),
             Expression::Int(v) => J::IntLit(*v),
             Expression::Long(v) => J::LongLit(*v),
             Expression::Bool(v) => J::BoolLit(*v),
@@ -181,6 +188,13 @@ impl<'a> FunctionConverter<'a> {
                     Some(VariableType::Bool) if *to != VariableType::Bool => {
                         bool_to_number(converted, &convert_type(to))
                     }
+                    // `(byte)` on a float goes through `int` and wraps; Rust `as i8` saturates.
+                    Some(VariableType::F32 | VariableType::F64) if *to == VariableType::I8 => {
+                        let int = J::cast(java::Type::Int, converted);
+                        let min = J::call(Some(J::name("Math")), "min", vec![J::IntLit(127), int]);
+                        let clamped = J::call(Some(J::name("Math")), "max", vec![J::IntLit(-128), min]);
+                        J::cast(java::Type::Byte, clamped)
+                    }
                     _ => J::cast(convert_type(to), converted),
                 }
             }
@@ -228,21 +242,29 @@ impl<'a> FunctionConverter<'a> {
             (true, Some(VariableType::Bool), Some(VariableType::I32)) => (bool_to_number(l, &java::Type::Int), r),
             _ => (l, r),
         };
-        J::binary(convert_binary_op(op), l, r)
+        let comparison = matches!(
+            op,
+            B::Equal | B::NotEqual | B::Less | B::LessEqual | B::Greater | B::GreaterEqual | B::And | B::Or
+        );
+        let result = J::binary(convert_binary_op(op), l, r);
+        if comparison { result } else { narrow_byte(result, &lt) }
     }
 
     fn convert_unary(&mut self, op: UnaryOperator, operand: &Expression) -> java::Expression {
         let t = self.derive_type(operand);
         match op {
-            UnaryOperator::Negate => J::Unary {
-                op: java::UnaryOperator::Negate,
-                operand: Box::new(self.convert_expression(operand)),
-            },
+            UnaryOperator::Negate => narrow_byte(
+                J::Unary { op: java::UnaryOperator::Negate, operand: Box::new(self.convert_expression(operand)) },
+                &t,
+            ),
             // Rust `!` on an integer is bitwise not.
-            UnaryOperator::Not => J::Unary {
-                op: if is_integer(&t) { java::UnaryOperator::BitNot } else { java::UnaryOperator::Not },
-                operand: Box::new(self.convert_expression(operand)),
-            },
+            UnaryOperator::Not => narrow_byte(
+                J::Unary {
+                    op: if is_integer(&t) { java::UnaryOperator::BitNot } else { java::UnaryOperator::Not },
+                    operand: Box::new(self.convert_expression(operand)),
+                },
+                &t,
+            ),
             // Objects are references already.
             UnaryOperator::Ref(_) if t.as_ref().is_none_or(is_object) => self.convert_expression(operand),
             UnaryOperator::Ref(false) => {

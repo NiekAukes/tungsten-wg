@@ -633,6 +633,7 @@ impl<'m> Converter<'m> {
             }
             E::Float(x) => N::Float(*x),
             E::Double(x) => N::Double(*x),
+            E::Byte(x) => N::Byte(*x),
             E::Int(x) => N::Int(*x),
             E::Long(x) => N::Long(*x),
             E::Bool(x) => N::Bool(*x),
@@ -750,6 +751,7 @@ fn const_expr<'m>(
         },
         E::Float(x) => C::Float(*x),
         E::Double(x) => C::Double(*x),
+        E::Byte(x) => C::Byte(*x),
         E::Int(x) => C::Int(*x),
         E::Long(x) => C::Long(*x),
         E::Bool(x) => C::Bool(*x),

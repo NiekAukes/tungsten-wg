@@ -6,6 +6,8 @@ Owned and lifetime-free; printed by `super::codegen::CudaCodeGenerator`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     Bool,
+    /// `signed char`: plain `char` has implementation-defined signedness.
+    SignedChar,
     Int,
     LongLong,
     Unsigned,

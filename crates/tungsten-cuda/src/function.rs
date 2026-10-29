@@ -307,20 +307,29 @@ pub fn build_kernel_body(program: &OptimizedProgram, naming: &Interface, config:
     }
 }
 
-/// `extern "C" __global__ void __launch_bounds__(N) <symbol>(...)`: native 3D launch that computes
-/// `local` from the thread position and calls the body. Without `body` it is the declaration that
+/// `extern "C" __global__ void __launch_bounds__(N) <symbol>(...)`: 1D launch that decodes the
+/// linear thread id into `local` (x fastest) and calls the body. Ids past the element count decode
+/// to `z >= DZ`, which the body's bounds check rejects. Without `body` it is the declaration that
 /// `interface.cuh` uses.
 pub fn build_kernel_wrapper(naming: &Interface, config: &CudaConfig, inst: &Instance, with_body: bool) -> cuda::Function {
+    use cuda::BinaryOperator::{Add, Divide, Multiply, Subtract};
     let shape = launch_shape(inst.dimensions, config.block_size);
-    let coordinate = |axis: &str| {
-        let mul = C::binary(
-            cuda::BinaryOperator::Multiply,
-            C::field(C::name("blockIdx"), axis),
-            C::field(C::name("blockDim"), axis),
-        );
-        C::cast(cuda::Type::Int, C::binary(cuda::BinaryOperator::Add, mul, C::field(C::name("threadIdx"), axis)))
-    };
-    let mut args = vec![int3(coordinate("x"), coordinate("y"), coordinate("z"))];
+    let (dx, dy, _) = inst.dimensions;
+    let declare = |name: &str, init| S::Declare { t: cuda::Type::Int, name: name.into(), init: Some(init), is_const: true };
+    let linear = C::cast(
+        cuda::Type::Int,
+        C::binary(
+            Add,
+            C::binary(Multiply, C::field(C::name("blockIdx"), "x"), C::field(C::name("blockDim"), "x")),
+            C::field(C::name("threadIdx"), "x"),
+        ),
+    );
+    let local = int3(
+        C::binary(Subtract, C::name("i"), C::binary(Multiply, C::name("yz"), C::IntLit(dx))),
+        C::binary(Subtract, C::name("yz"), C::binary(Multiply, C::name("z"), C::IntLit(dy))),
+        C::name("z"),
+    );
+    let mut args = vec![local];
     args.extend(kernel_arguments());
     cuda::Function {
         doc: None,
@@ -329,6 +338,13 @@ pub fn build_kernel_wrapper(naming: &Interface, config: &CudaConfig, inst: &Inst
         attributes: format!("__launch_bounds__({})", shape.threads_per_block()),
         name: kernel_symbol(config, naming, inst),
         params: kernel_parameters(),
-        body: with_body.then(|| vec![S::Expr(C::call(&kernel_body_name(naming, inst), args))]),
+        body: with_body.then(|| {
+            vec![
+                declare("i", linear),
+                declare("yz", C::binary(Divide, C::name("i"), C::IntLit(dx))),
+                declare("z", C::binary(Divide, C::name("yz"), C::IntLit(dy))),
+                S::Expr(C::call(&kernel_body_name(naming, inst), args)),
+            ]
+        }),
     }
 }

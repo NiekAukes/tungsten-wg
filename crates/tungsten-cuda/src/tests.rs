@@ -212,7 +212,10 @@ fn generates_cuda_for_small_program() {
         "if ((local.x >= 4) || (local.y >= 4) || (local.z >= 4)) {",
         "const tw::PositionIterator p = tw::make_position(ctx.config, local);",
         "extern \"C\" __global__ void __launch_bounds__(64) tungsten_gen_minecraft_final_d4x4x4_kernel(",
-        "(int)(blockIdx.x * blockDim.x + threadIdx.x)",
+        "const int i = (int)(blockIdx.x * blockDim.x + threadIdx.x);",
+        "const int yz = i / 4;",
+        "const int z = yz / 4;",
+        "minecraft_final_d4x4x4_kernel_body(int3{i - yz * 4, yz - z * 4, z}, origin,",
     ]);
     assert!(
         output.density_source.find("constexpr double base").unwrap()
@@ -247,8 +250,8 @@ fn generates_cuda_for_small_program() {
         "return ::tungsten_gen::Status{(int)tw_e_};",
         "static_assert(offsetof(HostConsts, sea_level) == offsetof(dev::DeviceHostConsts, sea_level)",
         "auto_constants->minecraft_temperature_0_ = tw::make_permutation_table(seed, (long long)0x",
-        "dev::tungsten_gen_minecraft_scalar_d1x1x1_kernel<<<dim3(1, 1, 1), dim3(1, 1, 1), 0, s.stream>>>",
-        "dev::tungsten_gen_minecraft_final_d4x4x4_kernel<<<dim3(1, 1, 1), dim3(4, 4, 4), 0, s.stream>>>",
+        "dev::tungsten_gen_minecraft_scalar_d1x1x1_kernel<<<1, 1, 0, s.stream>>>",
+        "dev::tungsten_gen_minecraft_final_d4x4x4_kernel<<<1, 64, 0, s.stream>>>",
         "cudaMemcpyAsync(s.result_minecraft_final, s.slab + dev::BufferLayout::minecraft_final_d4x4x4_output",
     ]);
     // The entry's dependencies run in an earlier wave than the entry itself.
@@ -315,4 +318,58 @@ fn program_without_inputs_or_entries() {
 #[should_panic(expected = "block_size")]
 fn rejects_invalid_block_size() {
     CudaBackend::new(CudaConfig { block_size: 100, ..CudaConfig::default() });
+}
+
+/// A 4x4x4 unit returning `I8`: byte constants, wrapping arithmetic, bit operations and casts.
+fn build_byte_program<'m>(arena: &'m Bump) -> SPMT<'m> {
+    let b = Builder::new(arena).named("minecraft:bytes").returns(VariableType::I8);
+    let table = b.constant(
+        "table",
+        VariableType::Array(Box::new(VariableType::I8), 3),
+        Expression::ArrayLiteral(vec![1i8.into(), (-2i8).into(), 127i8.into()]),
+    );
+    let a = b.local("a", VariableType::I8);
+    let wide = b.local("wide", VariableType::I32);
+    let d = b.local("d", VariableType::F64);
+    let mut b = b;
+    b.set_body(vec![
+        // 127 + 127 wraps
+        Statement::Assign { target: a, value: var(table).index(2i32) + 127i8 },
+        Statement::Assign { target: a, value: (-var(a)).bitand(var(a).shl(1i32)) },
+        Statement::Assign { target: wide, value: var(a).cast(VariableType::I32).bitand(255i32) },
+        Statement::Assign { target: d, value: 300.5f64.into() },
+        Statement::Assign { target: a, value: var(d).cast(VariableType::I8) },
+        Statement::Return(var(a) + var(wide).cast(VariableType::I8)),
+    ]);
+    let unit = b.finish_compute_unit();
+    SPMT {
+        density_functions: vec![unit],
+        functions: vec![],
+        main_density_functions: vec![MainDensityFunction {
+            density_function: unit,
+            dimensions: (4, 4, 4),
+            scaled_origin: (1.0, 1.0, 1.0),
+            scaled_position: (1.0, 1.0, 1.0),
+        }],
+    }
+}
+
+#[test]
+fn bytes() {
+    let arena = Bump::new();
+    let output = generate(&build_byte_program(&arena), CudaConfig::default());
+    write_out(&output, "bytes");
+    assert_contains("density.cu", &output.density_source, &[
+        "__device__ constexpr tw::Array<signed char, 3> table = tw::Array<signed char, 3>{{(signed char)1, (signed char)(-2), (signed char)127}};",
+        "__device__ signed char minecraft_bytes_d4x4x4(tw::PositionIterator p, const Ctx& ctx) {",
+        "signed char a{};",
+        // Computed in 32 bits, narrowed back.
+        "a = (signed char)((unsigned)table[2] + (unsigned)(signed char)127);",
+        "a = (signed char)((signed char)(0 - (unsigned)a) & (signed char)((unsigned)a << 1));",
+        "wide = (int)a & 255;",
+        "a = tw::f2i8(d);",
+        "return (signed char)((unsigned)a + (unsigned)(signed char)wide);",
+        "tw::buffer<signed char>(buffers, BufferLayout::minecraft_bytes_d4x4x4_output)",
+    ]);
+    assert_contains("orchestration.h", &output.public_header, &["const signed char* result_minecraft_bytes() const;"]);
 }

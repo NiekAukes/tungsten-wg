@@ -244,6 +244,7 @@ pub enum Expression<'m> {
     Variable(Rc<Variable>),
 
     // Literal values
+    I8Literal(i8),
     I32Literal(i32),
     I64Literal(i64),
     F32Literal(f32),
