@@ -147,6 +147,15 @@ impl NamingRules {
         }
     }
 
+    /// For inspection output: no reserved names and no sanitizing, names are the raw canonical
+    /// names plus the usual suffixes, de-duplicated only on real collisions.
+    pub fn inspect() -> Self {
+        Self {
+            reserved: vec![],
+            sanitize: |s| s.to_string(),
+        }
+    }
+
     /// Adds more reserved names (e.g. the generated class name).
     pub fn with_reserved(mut self, extra: impl IntoIterator<Item = String>) -> Self {
         self.reserved.extend(extra);

@@ -139,9 +139,8 @@ impl<'m> SPMTBuilder<'m> for Builder<'m> {
 
     /// Uniquely named local. This is what `spmt_body!`'s `let` expands to.
     fn local(&self, name: &str, t: VariableType) -> Var<'m> {
-        let mut st = self.state.borrow_mut();
         let v = self.named_var(name, t);
-        st.locals.push(v);
+        self.state.borrow_mut().locals.push(v);
         v
     }
 
@@ -154,9 +153,8 @@ impl<'m> SPMTBuilder<'m> for Builder<'m> {
 
     /// A named constant, hoisted out of the body.
     fn constant(&self, name: &str, t: VariableType, value: impl Into<Expression<'m>>) -> Var<'m> {
-        let mut st = self.state.borrow_mut();
         let v = self.named_var(name, t);
-        st.constants.push((v, value.into()));
+        self.state.borrow_mut().constants.push((v, value.into()));
         v
     }
 

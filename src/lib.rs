@@ -21,6 +21,11 @@ pub use tungsten_java as java;
 #[cfg(feature = "java")]
 pub use tungsten_java::backend::{JavaBackend, JavaConfig, JavaOutput};
 
+#[cfg(feature = "inspect")]
+pub use tungsten_inspect as inspect;
+#[cfg(feature = "inspect")]
+pub use tungsten_inspect::{InspectBackend, InspectConfig, InspectOutput};
+
 pub use tungsten_interface::{Backend, BackendError};
 
 use tungsten_interface::Interface;
