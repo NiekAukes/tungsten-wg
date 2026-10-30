@@ -53,6 +53,7 @@ tungsten-java = { path = "crates/tungsten-java" }
 tungsten-cuda = { path = "crates/tungsten-cuda" }
 tungsten-legacy = { path = "crates/tungsten-legacy" }
 tungsten-inspect = { path = "crates/tungsten-inspect" }
+tungsten-parse = { path = "crates/tungsten-parse" }
 
 [features]
 default = ["rust"]
@@ -60,6 +61,7 @@ rust = ["dep:tungsten-rust"]
 java = ["dep:tungsten-java"]
 inspect = ["dep:tungsten-inspect"]
 cuda = ["dep:tungsten-cuda"]
+parse = ["dep:tungsten-parse"]
 
 [dependencies]
 thiserror.workspace = true
@@ -72,6 +74,7 @@ tungsten-rust = { workspace = true, optional = true }
 tungsten-java = { workspace = true, optional = true }
 tungsten-inspect = { workspace = true, optional = true }
 tungsten-cuda = { workspace = true, optional = true }
+tungsten-parse = { workspace = true, optional = true }
 
 [lib]
 name = "tungsten_wg"

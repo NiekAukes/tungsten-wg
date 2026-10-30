@@ -31,6 +31,9 @@ pub use tungsten_inspect as inspect;
 #[cfg(feature = "inspect")]
 pub use tungsten_inspect::{InspectBackend, InspectConfig, InspectOutput};
 
+#[cfg(feature = "parse")]
+pub use tungsten_parse as parse;
+
 pub use tungsten_interface::{Backend, BackendError};
 
 use tungsten_interface::Interface;
