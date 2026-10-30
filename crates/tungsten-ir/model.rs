@@ -524,6 +524,8 @@ pub enum Expression {
     // this is used to reference the permutation tables that are passed as arguments to noise functions
     PermutationTable(Ref<PermutationTableInput>),
     HostInput(Ref<HostInput>),
+    /// A read-only value supplied by the evaluation context (origin, position, scales).
+    Ambient(AmbientKind),
 
     BinaryOp {
         op: BinaryOperator,
@@ -568,6 +570,14 @@ pub enum Expression {
         to: VariableType,
         expr: Box<Expression>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AmbientKind {
+    Origin,
+    Pos3,
+    OriginScale,
+    PositionScale,
 }
 
 #[derive(Debug, Clone, PartialEq)]
