@@ -106,6 +106,7 @@ impl<'a> FunctionConverter<'a> {
             Expression::Int(v) => J::IntLit(*v),
             Expression::Long(v) => J::LongLit(*v),
             Expression::Bool(v) => J::BoolLit(*v),
+            Expression::Ambient(k) => unimplemented!("Ambient({k:?}) lowering is not implemented for the java backend"),
             Expression::FunctionCall { function, parameters } => {
                 self.called.push(*function);
                 let program = self.program;

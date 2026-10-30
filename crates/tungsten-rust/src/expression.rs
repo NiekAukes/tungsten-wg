@@ -151,6 +151,7 @@ impl<'a> FunctionConverter<'a> {
             Expression::Int(v) => R::I32Literal(*v),
             Expression::Long(v) => R::I64Literal(*v),
             Expression::Bool(v) => R::BoolLiteral(*v),
+            Expression::Ambient(k) => unimplemented!("Ambient({k:?}) lowering is not implemented for the Rust backend"),
             Expression::FunctionCall {
                 function,
                 parameters,

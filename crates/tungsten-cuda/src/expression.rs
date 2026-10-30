@@ -125,6 +125,7 @@ impl<'a> FunctionConverter<'a> {
             Expression::Int(v) => C::IntLit(*v),
             Expression::Long(v) => C::LongLit(*v),
             Expression::Bool(v) => C::BoolLit(*v),
+            Expression::Ambient(k) => unimplemented!("Ambient({k:?}) lowering is not implemented for the cuda backend"),
             Expression::FunctionCall { function, parameters } => {
                 self.called.push(*function);
                 let program = self.program;
