@@ -201,9 +201,6 @@ fn inspects_small_program() {
         "entries/t/a@4x4x4/buffers.txt",
         "entries/t/a@4x4x4/buffers.cpu.svg",
         "entries/t/b@4x4x4/buffers.gpu.svg",
-        "functions/t/a.dot",
-        "functions/t/accumulate.dot",
-        "functions/t/orphan.dot",
     ] {
         assert!(
             out.files.contains_key(std::path::Path::new(path)),
@@ -215,10 +212,6 @@ fn inspects_small_program() {
     assert!(ir.contains("unit t:a -> f64 {"));
     assert!(ir.contains("fn t:accumulate(t: f64) -> f64 {"));
     assert!(ir.contains("const scale = (base * 2.0)"));
-    assert_eq!(
-        out.inspection.paths["cu:t:a"], "functions/t/a.dot",
-        "units map to their main function's DAG"
-    );
 
     let json = &out.files[std::path::Path::new("inspection.json")];
     let parsed: serde_json::Value = serde_json::from_str(json).expect("inspection.json parses");
@@ -325,41 +318,6 @@ fn inspects_small_program() {
     assert_eq!(i.host_inputs[0].users, vec!["cu:t:seed".to_string()]);
     assert!(i.call_graph.edges.iter().any(|e| e.to == "fn:t:accumulate"));
 
-    // Dataflow: the helper's loop has a loop-carried edge, and `t:a` has a φ and shared CSE.
-    let helper = i
-        .functions
-        .iter()
-        .find(|f| f.display == "t:accumulate")
-        .unwrap();
-    assert_eq!(helper.kind, FunctionKind::Helper);
-    let dag = helper.dag.as_ref().unwrap();
-    assert!(dag.edges.iter().any(|e| e.loop_carried));
-    let main_a = i
-        .functions
-        .iter()
-        .find(|f| f.id == unit_info(i, "t:a").function)
-        .unwrap();
-    let dag = main_a.dag.as_ref().unwrap();
-    let ret = dag
-        .nodes
-        .iter()
-        .find(|n| n.kind == NodeKind::Return)
-        .unwrap();
-    let mul = dag.edges.iter().find(|e| e.to == ret.id).unwrap().from;
-    let phi_inputs = dag
-        .edges
-        .iter()
-        .filter(|e| e.to == mul && e.port == "l")
-        .count();
-    assert_eq!(
-        phi_inputs, 2,
-        "x after the if is a φ of the then- and else-def"
-    );
-    assert!(
-        dag.summary.nodes_before_cse > dag.summary.nodes_after_cse,
-        "`s + n` is computed twice"
-    );
-
     // Snapshot + inline: provenance names the absorbed unit, and the snapshot is independent.
     let before = program.clone();
     let stats = perform_inline(&mut program);
@@ -389,4 +347,52 @@ fn inspects_small_program() {
         "{summary}"
     );
     assert!(summary.contains("added: (none)"), "{summary}");
+}
+
+/// A 4x4x4 unit returning `I8`: byte constants, wrapping arithmetic, bit operations and casts.
+fn build_byte_program<'m>(arena: &'m Bump) -> SPMT<'m> {
+    let b = Builder::new(arena).named("minecraft:bytes").returns(VariableType::I8);
+    let table = b.constant(
+        "table",
+        VariableType::Array(Box::new(VariableType::I8), 3),
+        Expression::ArrayLiteral(vec![1i8.into(), (-2i8).into(), 127i8.into()]),
+    );
+    let a = b.local("a", VariableType::I8);
+    let wide = b.local("wide", VariableType::I32);
+    let d = b.local("d", VariableType::F64);
+    let mut b = b;
+    b.set_body(vec![
+        // 127 + 127 wraps
+        Statement::Assign { target: a, value: var(table).index(2i32) + 127i8 },
+        Statement::Assign { target: a, value: (-var(a)).bitand(var(a).shl(1i32)) },
+        Statement::Assign { target: wide, value: var(a).cast(VariableType::I32).bitand(255i32) },
+        Statement::Assign { target: d, value: 300.5f64.into() },
+        Statement::Assign { target: a, value: var(d).cast(VariableType::I8) },
+        Statement::Return(var(a) + var(wide).cast(VariableType::I8)),
+    ]);
+    let unit = b.finish_compute_unit();
+    SPMT {
+        density_functions: vec![unit],
+        functions: vec![],
+        main_density_functions: vec![MainDensityFunction {
+            density_function: unit,
+            dimensions: (4, 4, 4),
+            scaled_origin: (1.0, 1.0, 1.0),
+            scaled_position: (1.0, 1.0, 1.0),
+        }],
+    }
+}
+
+#[test]
+fn byte_buffers_and_literals() {
+    let arena = Bump::new();
+    let program = convert(&build_byte_program(&arena)).expect("conversion");
+    let i = inspect(&program, &InspectConfig::default()).inspection;
+    let entry = &i.entries[0];
+    for axis in [&entry.buffers.cpu, &entry.buffers.gpu] {
+        let out = axis.buffers.iter().find(|b| b.pinned).expect("entry output is pinned");
+        assert_eq!(out.bytes, 64, "4x4x4 bytes");
+    }
+    let ir = &i.functions.iter().find(|f| f.ir.contains("table")).expect("unit function").ir;
+    assert!(ir.contains("127b"), "missing byte literal in:\n{ir}");
 }

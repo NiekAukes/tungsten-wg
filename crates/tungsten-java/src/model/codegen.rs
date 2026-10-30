@@ -72,6 +72,7 @@ pub fn long_literal(v: i64) -> String {
 pub fn type_string(t: &Type) -> String {
     match t {
         Type::Boolean => "boolean".into(),
+        Type::Byte => "byte".into(),
         Type::Int => "int".into(),
         Type::Long => "long".into(),
         Type::Float => "float".into(),

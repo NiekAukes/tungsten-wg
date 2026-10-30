@@ -16,6 +16,7 @@ exclude = [
 [workspace]
 members = [
     "crates/tungsten-codegen",
+    "crates/tungsten-cuda",
     "crates/tungsten-interface",
     "crates/tungsten-java",
     "crates/tungsten-inspect",
@@ -44,6 +45,7 @@ tungsten-interface = { path = "crates/tungsten-interface" }
 tungsten-optimizer = { path = "crates/tungsten-optimizer" }
 tungsten-rust = { path = "crates/tungsten-rust" }
 tungsten-java = { path = "crates/tungsten-java" }
+tungsten-cuda = { path = "crates/tungsten-cuda" }
 tungsten-legacy = { path = "crates/tungsten-legacy" }
 tungsten-inspect = { path = "crates/tungsten-inspect" }
 
@@ -52,6 +54,7 @@ default = ["rust"]
 rust = ["dep:tungsten-rust"]
 java = ["dep:tungsten-java"]
 inspect = ["dep:tungsten-inspect"]
+cuda = ["dep:tungsten-cuda"]
 
 [dependencies]
 thiserror.workspace = true
@@ -63,6 +66,7 @@ tungsten-legacy.workspace = true
 tungsten-rust = { workspace = true, optional = true }
 tungsten-java = { workspace = true, optional = true }
 tungsten-inspect = { workspace = true, optional = true }
+tungsten-cuda = { workspace = true, optional = true }
 
 [lib]
 name = "tungsten_wg"

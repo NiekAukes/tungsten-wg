@@ -134,6 +134,18 @@ name = "tungsten-codegen"
 version = "0.1.2"
 
 [[package]]
+name = "tungsten-cuda"
+version = "0.1.2"
+dependencies = [
+ "bumpalo",
+ "tungsten-codegen",
+ "tungsten-interface",
+ "tungsten-ir",
+ "tungsten-legacy",
+ "tungsten-rust",
+]
+
+[[package]]
 name = "tungsten-inspect"
 version = "0.1.2"
 dependencies = [
@@ -194,6 +206,7 @@ dependencies = [
  "tungsten-codegen",
  "tungsten-interface",
  "tungsten-ir",
+ "tungsten-legacy",
 ]
 
 [[package]]
@@ -202,6 +215,7 @@ version = "0.1.2"
 dependencies = [
  "thiserror",
  "tungsten-codegen",
+ "tungsten-cuda",
  "tungsten-inspect",
  "tungsten-interface",
  "tungsten-ir",

@@ -512,6 +512,7 @@ impl DagBuilder<'_> {
             }
             Expression::Float(x) => self.leaf(NodeKind::Literal(Literal::Float(*x)), region),
             Expression::Double(x) => self.leaf(NodeKind::Literal(Literal::Double(*x)), region),
+            Expression::Byte(x) => self.leaf(NodeKind::Literal(Literal::Byte(*x)), region),
             Expression::Int(x) => self.leaf(NodeKind::Literal(Literal::Int(*x)), region),
             Expression::Long(x) => self.leaf(NodeKind::Literal(Literal::Long(*x)), region),
             Expression::Bool(x) => self.leaf(NodeKind::Literal(Literal::Bool(*x)), region),
@@ -653,6 +654,7 @@ fn kind_key(kind: &NodeKind) -> String {
         NodeKind::Literal(l) => match l {
             Literal::Float(x) => format!("lit:f32:{:x}", x.to_bits()),
             Literal::Double(x) => format!("lit:f64:{:x}", x.to_bits()),
+            Literal::Byte(x) => format!("lit:i8:{x}"),
             Literal::Int(x) => format!("lit:i32:{x}"),
             Literal::Long(x) => format!("lit:i64:{x}"),
             Literal::Bool(x) => format!("lit:bool:{x}"),

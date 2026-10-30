@@ -243,7 +243,7 @@ macro_rules! impl_from_lit {
         }
     )*};
 }
-impl_from_lit!(f32 => Float, f64 => Double, i32 => Int, i64 => Long, bool => Bool);
+impl_from_lit!(f32 => Float, f64 => Double, i8 => Byte, i32 => Int, i64 => Long, bool => Bool);
 
 impl<'m> From<Var<'m>> for Expression<'m> {
     fn from(v: Var<'m>) -> Self {

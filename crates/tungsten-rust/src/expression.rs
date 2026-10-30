@@ -81,6 +81,7 @@ pub fn const_refs(e: &ConstExpr, out: &mut Vec<Ref<Constant>>) {
         }
         ConstExpr::Float(_)
         | ConstExpr::Double(_)
+        | ConstExpr::Byte(_)
         | ConstExpr::Int(_)
         | ConstExpr::Long(_)
         | ConstExpr::Bool(_) => {}
@@ -99,6 +100,7 @@ pub fn convert_const_expr<'m>(
         ConstExpr::Constant(r) => R::Variable(constant_variable(program, naming, *r)),
         ConstExpr::Float(v) => R::F32Literal(*v),
         ConstExpr::Double(v) => R::F64Literal(*v),
+        ConstExpr::Byte(v) => R::I8Literal(*v),
         ConstExpr::Int(v) => R::I32Literal(*v),
         ConstExpr::Long(v) => R::I64Literal(*v),
         ConstExpr::Bool(v) => R::BoolLiteral(*v),
@@ -145,6 +147,7 @@ impl<'a> FunctionConverter<'a> {
             Expression::Variable(r) => R::Variable(self.declare_var(*r)),
             Expression::Float(v) => R::F32Literal(*v),
             Expression::Double(v) => R::F64Literal(*v),
+            Expression::Byte(v) => R::I8Literal(*v),
             Expression::Int(v) => R::I32Literal(*v),
             Expression::Long(v) => R::I64Literal(*v),
             Expression::Bool(v) => R::BoolLiteral(*v),

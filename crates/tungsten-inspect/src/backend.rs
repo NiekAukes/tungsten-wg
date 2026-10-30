@@ -54,6 +54,7 @@ impl Default for Views {
 pub struct ElementSizes {
     pub f32: usize,
     pub f64: usize,
+    pub i8: usize,
     pub i32: usize,
     pub i64: usize,
     pub bool: usize,
@@ -68,6 +69,7 @@ impl Default for ElementSizes {
         Self {
             f32: 4,
             f64: 8,
+            i8: 1,
             i32: 4,
             i64: 8,
             bool: 1,

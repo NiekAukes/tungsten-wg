@@ -485,6 +485,7 @@ impl RustCodeGenerator {
     ) -> String {
         match expr {
             icl::Expression::Variable(var) => self.variable_to_string(var, p),
+            icl::Expression::I8Literal(val) => format!("{}_i8", val),
             icl::Expression::I32Literal(val) => format!("{}_i32", val),
             icl::Expression::I64Literal(val) => format!("{}_i64", val),
             icl::Expression::F32Literal(val) => self.format_f32_literal(*val),

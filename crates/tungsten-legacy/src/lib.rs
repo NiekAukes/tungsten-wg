@@ -16,6 +16,7 @@ pub fn try_derive_type<'a>(expr: &model::Expression<'a>) -> Option<model::Variab
         model::Expression::Variable(var) => Some(var.t.clone()),
         model::Expression::Float(_) => Some(model::VariableType::F32), // or F64 depending on precision
         model::Expression::Double(_) => Some(model::VariableType::F64),
+        model::Expression::Byte(_) => Some(model::VariableType::I8),
         model::Expression::Int(_) => Some(model::VariableType::I32),
         model::Expression::Long(_) => Some(model::VariableType::I64),
         model::Expression::Bool(_) => Some(model::VariableType::Bool),

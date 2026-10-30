@@ -187,3 +187,61 @@ fn generates_java_for_small_program() {
         "constants must be emitted in dependency order"
     );
 }
+
+/// A 4x4x4 unit returning `I8`: byte constants, wrapping arithmetic, bit operations and casts.
+fn build_byte_program<'m>(arena: &'m Bump) -> SPMT<'m> {
+    let b = Builder::new(arena).named("minecraft:bytes").returns(VariableType::I8);
+    let table = b.constant(
+        "table",
+        VariableType::Array(Box::new(VariableType::I8), 3),
+        Expression::ArrayLiteral(vec![1i8.into(), (-2i8).into(), 127i8.into()]),
+    );
+    let a = b.local("a", VariableType::I8);
+    let wide = b.local("wide", VariableType::I32);
+    let d = b.local("d", VariableType::F64);
+    let mut b = b;
+    b.set_body(vec![
+        // 127 + 127 wraps
+        Statement::Assign { target: a, value: var(table).index(2i32) + 127i8 },
+        Statement::Assign { target: a, value: (-var(a)).bitand(var(a).shl(1i32)) },
+        Statement::Assign { target: wide, value: var(a).cast(VariableType::I32).bitand(255i32) },
+        Statement::Assign { target: d, value: 300.5f64.into() },
+        Statement::Assign { target: a, value: var(d).cast(VariableType::I8) },
+        Statement::Return(var(a) + var(wide).cast(VariableType::I8)),
+    ]);
+    let unit = b.finish_compute_unit();
+    SPMT {
+        density_functions: vec![unit],
+        functions: vec![],
+        main_density_functions: vec![MainDensityFunction {
+            density_function: unit,
+            dimensions: (4, 4, 4),
+            scaled_origin: (1.0, 1.0, 1.0),
+            scaled_position: (1.0, 1.0, 1.0),
+        }],
+    }
+}
+
+#[test]
+fn bytes() {
+    let arena = Bump::new();
+    let program = convert(&build_byte_program(&arena)).expect("conversion");
+    let mut backend = JavaBackend::new(JavaConfig::default());
+    let interface = Interface::build(&program, backend.naming_rules());
+    backend.generate(&program, &interface).unwrap();
+    let java = &backend.output().expect("java output").source;
+    for e in [
+        "static final byte[] table = new byte[]{(byte) 1, (byte) (-2), (byte) 127};",
+        "final byte[] minecraft_bytes_d4x4x4_output = new byte[64];",
+        "static byte minecraft_bytes_d4x4x4(",
+        // Java promotes bytes to int; results are narrowed back.
+        "a = (byte) (GeneratedWorldgen.table[2] + ((byte) 127));",
+        "(((byte) (-a)) & ((byte) (a << 1)))",
+        "wide = (int) (((int) a) & 255);",
+        // Saturating like Rust `as i8`, not wrapping like `(byte)`.
+        "a = (byte) Math.max((-128), Math.min(127, (int) d));",
+        "return (byte) (a + ((byte) wide));",
+    ] {
+        assert!(java.contains(e), "missing `{}` in:\n{}", e, java);
+    }
+}
