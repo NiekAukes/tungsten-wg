@@ -1,5 +1,5 @@
 /*
-Emission of density functions, helper functions, constants and per-instance kernels (SPEC.md §9).
+Emission of density functions, helper functions, constants and per-instance kernels.
 Every density and helper function takes the uniform parameters first (see `uniform_parameters`).
 Each kernel is a `__device__` body holding all per-instance logic plus a thin `extern "C"`
 wrapper, so a future fused kernel can call several bodies unchanged.

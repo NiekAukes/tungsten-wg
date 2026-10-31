@@ -1,5 +1,5 @@
 /*
-Orchestration codegen for CUDA (SPEC.md §10, §11): `interface.cuh` (the structs and kernel
+Orchestration codegen for CUDA: `interface.cuh` (the structs and kernel
 declarations the device code is generated against), the CUDA-free public header
 `orchestration.h`, the host source `orchestration.cu`, and assembly of all four files.
 

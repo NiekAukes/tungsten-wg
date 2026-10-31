@@ -1,5 +1,5 @@
 /*
-Expression conversion from the optimized IR to CUDA C++ (SPEC.md §7).
+Expression conversion from the optimized IR to CUDA C++.
 Host inputs, permutation tables and density buffers are read through the uniform `ctx`. Integer
 arithmetic wraps and shifts are masked (Java semantics), and float -> int casts saturate.
 */
