@@ -15,7 +15,9 @@ exclude = [
 
 [workspace]
 members = [
+    "crates/tungsten-check",
     "crates/tungsten-codegen",
+    "crates/tungsten-core",
     "crates/tungsten-cuda",
     "crates/tungsten-interface",
     "crates/tungsten-java",
@@ -44,6 +46,8 @@ stacker = "0.1.25"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0.40"
+# Pinned together with VERUS_TAG in scripts/verify.sh (the script checks it).
+vstd = "=0.0.0-2026-10-25-0158"
 tungsten-ir = { path = "crates/tungsten-ir" }
 tungsten-codegen = { path = "crates/tungsten-codegen" }
 tungsten-interface = { path = "crates/tungsten-interface" }
@@ -54,6 +58,8 @@ tungsten-cuda = { path = "crates/tungsten-cuda" }
 tungsten-legacy = { path = "crates/tungsten-legacy" }
 tungsten-inspect = { path = "crates/tungsten-inspect" }
 tungsten-parse = { path = "crates/tungsten-parse" }
+tungsten-core = { path = "crates/tungsten-core" }
+tungsten-check = { path = "crates/tungsten-check" }
 
 [features]
 default = ["rust"]
@@ -62,6 +68,7 @@ java = ["dep:tungsten-java"]
 inspect = ["dep:tungsten-inspect"]
 cuda = ["dep:tungsten-cuda"]
 parse = ["dep:tungsten-parse"]
+check = ["dep:tungsten-check"]
 
 [dependencies]
 thiserror.workspace = true
@@ -75,6 +82,7 @@ tungsten-java = { workspace = true, optional = true }
 tungsten-inspect = { workspace = true, optional = true }
 tungsten-cuda = { workspace = true, optional = true }
 tungsten-parse = { workspace = true, optional = true }
+tungsten-check = { workspace = true, optional = true }
 
 [lib]
 name = "tungsten_wg"
