@@ -41,6 +41,9 @@ pub enum ConvertError {
         constant: String,
         found: &'static str,
     },
+    /// The type of a field access base can't be determined (e.g. an empty array literal or an
+    /// index into a non-array).
+    UnknownFieldBaseType { context: String, field: String },
 }
 
 impl fmt::Display for ConvertError {
@@ -71,6 +74,12 @@ impl fmt::Display for ConvertError {
                 write!(
                     f,
                     "constant `{constant}` is not a constant expression ({found})"
+                )
+            }
+            ConvertError::UnknownFieldBaseType { context, field } => {
+                write!(
+                    f,
+                    "in `{context}`: can't determine the type of the base of field `{field}`"
                 )
             }
         }
@@ -688,12 +697,15 @@ impl<'m> Converter<'m> {
                 base,
                 field,
                 type_of_field,
-                known_idnex,
+                known_idnex: _,
             } => N::Field {
+                base_type: base_type(base).ok_or_else(|| ConvertError::UnknownFieldBaseType {
+                    context: scope.label.clone(),
+                    field: field.clone(),
+                })?,
                 base: self.boxed(scope, base)?,
                 field: field.clone(),
                 type_of_field: type_of_field.clone(),
-                known_idnex: *known_idnex,
             },
             E::ArrayAccess { array, index } => N::ArrayAccess {
                 array: self.boxed(scope, array)?,
@@ -773,12 +785,15 @@ fn const_expr<'m>(
             base,
             field,
             type_of_field,
-            known_idnex,
+            known_idnex: _,
         } => C::Field {
+            base_type: base_type(base).ok_or_else(|| ConvertError::UnknownFieldBaseType {
+                context: constant.to_string(),
+                field: field.clone(),
+            })?,
             base: boxed(base)?,
             field: field.clone(),
             type_of_field: type_of_field.clone(),
-            known_idnex: *known_idnex,
         },
         E::ArrayAccess { array, index } => C::ArrayAccess {
             array: boxed(array)?,
@@ -803,6 +818,60 @@ fn const_expr<'m>(
 // ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
+
+/// The type of a field access base, stored in the new IR's `Field::base_type`. `None` if no rule
+/// gives one (empty array literal, index into a non-array). Unlike `try_derive_type` it handles
+/// mixed `vec3`/`pos3`/scalar arithmetic and indexing into arrays.
+fn base_type(e: &old::Expression<'_>) -> Option<old::VariableType> {
+    use old::BinaryOperator as B;
+    use old::Expression as E;
+    use old::VariableType as T;
+    Some(match e {
+        E::Variable(v) => v.t.clone(),
+        E::Float(_) => T::F32,
+        E::Double(_) => T::F64,
+        E::Byte(_) => T::I8,
+        E::Int(_) => T::I32,
+        E::Long(_) => T::I64,
+        E::Bool(_) => T::Bool,
+        E::FunctionCall { function, .. } => function.return_type.clone(),
+        E::ExternCall { return_type, .. } => return_type.clone(),
+        E::DensityVariable(input, _) => input.density_function.return_type.clone(),
+        E::PermutationTable(old::PermutationTableInput::PerlinNoise { .. }) => T::PermutationTable,
+        E::PermutationTable(old::PermutationTableInput::Base3DNoise) => {
+            T::InterpolatedNoiseSampler
+        }
+        E::BinaryOp { op, left, right } => match op {
+            B::Equal
+            | B::NotEqual
+            | B::Less
+            | B::LessEqual
+            | B::Greater
+            | B::GreaterEqual
+            | B::And
+            | B::Or => T::Bool,
+            B::Add | B::Subtract | B::Multiply | B::Divide => {
+                let l = base_type(left)?;
+                match (&l, base_type(right)) {
+                    (T::Vec3, Some(T::Pos3)) | (T::Pos3, Some(T::Vec3)) => T::Vec3,
+                    _ => l,
+                }
+            }
+            _ => base_type(left)?,
+        },
+        E::UnaryOp { operand, .. } => base_type(operand)?,
+        E::Field { type_of_field, .. } => type_of_field.clone(),
+        E::ArrayAccess { array, .. } => match base_type(array)? {
+            T::Array(elem, _) => *elem,
+            T::Vec3 => T::F64,
+            T::Pos3 => T::I32,
+            _ => return None,
+        },
+        E::Construct { t, .. } | E::ConstructExtern { t, .. } => t.clone(),
+        E::ExplicitCast { to, .. } => to.clone(),
+        E::ArrayLiteral(items) => T::Array(Box::new(base_type(items.first()?)?), items.len()),
+    })
+}
 
 fn empty_function(return_type: old::VariableType) -> new::Function {
     new::Function {
@@ -994,3 +1063,66 @@ fn unary_op(op: old::UnaryOperator) -> new::UnaryOperator {
 //         ));
 //     }
 // }
+
+#[cfg(test)]
+mod base_type_tests {
+    use super::base_type;
+    use crate::spmt::{self as old, BinaryOperator as B, Expression as E, VariableType as T};
+
+    fn var<'m>(v: &'m old::Variable) -> E<'m> {
+        E::Variable(old::Interned::new(v))
+    }
+
+    fn bin<'m>(op: B, l: E<'m>, r: E<'m>) -> E<'m> {
+        E::BinaryOp {
+            op,
+            left: Box::new(l),
+            right: Box::new(r),
+        }
+    }
+
+    #[test]
+    fn rules() {
+        let v3 = old::Variable {
+            name: old::Name::Named("v".into()),
+            t: T::Vec3,
+        };
+        let p3 = old::Variable {
+            name: old::Name::Named("p".into()),
+            t: T::Pos3,
+        };
+        let arr = old::Variable {
+            name: old::Name::Named("a".into()),
+            t: T::Array(Box::new(T::Pos3), 2),
+        };
+        // Mixed binops, which `try_derive_type` can't type.
+        assert_eq!(base_type(&bin(B::Multiply, var(&v3), E::Double(2.0))), Some(T::Vec3));
+        assert_eq!(base_type(&bin(B::Add, var(&p3), var(&v3))), Some(T::Vec3));
+        assert_eq!(base_type(&bin(B::Add, var(&v3), var(&p3))), Some(T::Vec3));
+        assert_eq!(base_type(&bin(B::Less, var(&v3), var(&p3))), Some(T::Bool));
+        // Indexing.
+        fn index(a: E<'_>) -> E<'_> {
+            E::ArrayAccess {
+                array: Box::new(a),
+                index: Box::new(E::Int(0)),
+            }
+        }
+        assert_eq!(base_type(&index(var(&arr))), Some(T::Pos3));
+        assert_eq!(base_type(&index(var(&v3))), Some(T::F64));
+        assert_eq!(base_type(&index(E::Double(1.0))), None);
+        // Array literals.
+        assert_eq!(
+            base_type(&E::ArrayLiteral(vec![E::Float(1.0), E::Float(2.0)])),
+            Some(T::Array(Box::new(T::F32), 2))
+        );
+        assert_eq!(base_type(&E::ArrayLiteral(vec![])), None);
+        // Nested fields use the field's type.
+        let field = E::Field {
+            base: Box::new(var(&v3)),
+            field: "x".into(),
+            type_of_field: T::F64,
+            known_idnex: None,
+        };
+        assert_eq!(base_type(&field), Some(T::F64));
+    }
+}
