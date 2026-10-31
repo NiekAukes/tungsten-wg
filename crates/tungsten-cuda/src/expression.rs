@@ -34,11 +34,11 @@ pub fn const_to_expression(e: &ConstExpr) -> Expression {
         }
         ConstExpr::UnaryOp { op, operand } => Expression::UnaryOp { op: *op, operand: b(operand) },
         ConstExpr::ExplicitCast { to, expr } => Expression::ExplicitCast { to: to.clone(), expr: b(expr) },
-        ConstExpr::Field { base, field, type_of_field, known_idnex } => Expression::Field {
+        ConstExpr::Field { base, field, type_of_field, base_type } => Expression::Field {
             base: b(base),
             field: field.clone(),
             type_of_field: type_of_field.clone(),
-            known_idnex: *known_idnex,
+            base_type: base_type.clone(),
         },
         ConstExpr::ArrayAccess { array, index } => {
             Expression::ArrayAccess { array: b(array), index: b(index) }
@@ -168,17 +168,13 @@ impl<'a> FunctionConverter<'a> {
             }
             Expression::BinaryOp { op, left, right } => self.convert_binary(*op, left, right),
             Expression::UnaryOp { op, operand } => self.convert_unary(*op, operand),
-            Expression::Field { base, field, known_idnex, .. } => {
+            Expression::Field { base, field, .. } => {
                 let base_type = self.derive_type(base);
-                let name = match (known_idnex, base_type.as_ref()) {
-                    (Some(i), Some(t)) if is_vector(t) => ["x", "y", "z"][*i].to_string(),
-                    _ => field.clone(),
-                };
                 let base = self.convert_expression(base);
                 if base_type.as_ref().is_some_and(is_pointer) {
-                    C::arrow(base, &name)
+                    C::arrow(base, field)
                 } else {
-                    C::field(base, &name)
+                    C::field(base, field)
                 }
             }
             Expression::ArrayAccess { array, index } => {

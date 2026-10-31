@@ -32,11 +32,11 @@ pub fn const_to_expression(e: &ConstExpr) -> Expression {
         }
         ConstExpr::UnaryOp { op, operand } => Expression::UnaryOp { op: *op, operand: b(operand) },
         ConstExpr::ExplicitCast { to, expr } => Expression::ExplicitCast { to: to.clone(), expr: b(expr) },
-        ConstExpr::Field { base, field, type_of_field, known_idnex } => Expression::Field {
+        ConstExpr::Field { base, field, type_of_field, base_type } => Expression::Field {
             base: b(base),
             field: field.clone(),
             type_of_field: type_of_field.clone(),
-            known_idnex: *known_idnex,
+            base_type: base_type.clone(),
         },
         ConstExpr::ArrayAccess { array, index } => {
             Expression::ArrayAccess { array: b(array), index: b(index) }
