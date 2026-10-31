@@ -81,12 +81,12 @@ pub fn to_const(e: Expression) -> Option<ConstExpr> {
             base,
             field,
             type_of_field,
-            known_idnex,
+            base_type,
         } => ConstExpr::Field {
             base: b(base)?,
             field,
             type_of_field,
-            known_idnex,
+            base_type,
         },
         Expression::ArrayAccess { array, index } => ConstExpr::ArrayAccess {
             array: b(array)?,

@@ -2,6 +2,7 @@
 
 use tungsten_ir::*;
 
+use super::derive::Deriver;
 use super::float::quote_name;
 use super::labels::Labels;
 use crate::stack;
@@ -51,12 +52,12 @@ fn const_to_expression_inner(c: &ConstExpr) -> Expression {
             base,
             field,
             type_of_field,
-            known_idnex,
+            base_type,
         } => Expression::Field {
             base: b(base),
             field: field.clone(),
             type_of_field: type_of_field.clone(),
-            known_idnex: *known_idnex,
+            base_type: base_type.clone(),
         },
         ConstExpr::ArrayAccess { array, index } => Expression::ArrayAccess {
             array: b(array),
@@ -74,6 +75,8 @@ fn const_to_expression_inner(c: &ConstExpr) -> Expression {
 
 pub(super) struct ExprPrinter<'a> {
     pub labels: &'a Labels,
+    /// Decides whether a field's base type has to be written.
+    pub derive: &'a Deriver<'a>,
     /// The function the expression is in, for variable labels. `None` in constants.
     pub f: Option<Ref<Function>>,
 }
@@ -182,7 +185,7 @@ impl ExprPrinter<'_> {
                 base,
                 field,
                 type_of_field,
-                known_idnex,
+                base_type,
             } => {
                 self.postfix_base(base, out);
                 out.push_str(&format!(
@@ -190,8 +193,8 @@ impl ExprPrinter<'_> {
                     quote_name(field),
                     type_text(type_of_field)
                 ));
-                if let Some(i) = known_idnex {
-                    out.push_str(&format!(", {i}"));
+                if self.derive.expr(self.f, base).as_ref() != Some(base_type) {
+                    out.push_str(&format!("; {}", type_text(base_type)));
                 }
                 out.push('>');
             }

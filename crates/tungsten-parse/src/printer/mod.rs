@@ -1,5 +1,6 @@
 //! The canonical printer. See SPEC §10.
 
+mod derive;
 mod envelope;
 mod expr;
 pub(crate) mod float;

@@ -32,7 +32,7 @@ form that is fully explicit, deterministic, and a fixpoint of `print ∘ parse`.
 | Precedence | Rust precedence. Comparisons don't associate. Shift and bitwise ops (`<< >> >>> & ^ \|`) can't mix unparenthesized with any other binary operator. Canonical form fully parenthesizes. |
 | Negative literals | A `-` glued to a digit or `inf` in operand position is part of the literal. `Negate` prints as `-(e)`. |
 | Literal typing | The suffix alone decides inside bodies and const exprs. Contextual int→float only in attribute and envelope positions. |
-| Derived fields | Only: extern signatures (from `Env`), `Field` type (from base type, with `known_idnex = None`), `source_hash = 0`, the density-input `var`. Lists (`helpers`, `tables`, `hosts`, `consts`, fn `@hosts`) are never derived. Omitted means empty. |
+| Derived fields | Only: extern signatures (from `Env`), `Field` type and base type (from `type_of(base)`), `source_hash = 0`, the density-input `var`. Lists (`helpers`, `tables`, `hosts`, `consts`, fn `@hosts`) are never derived. Omitted means empty. |
 | Failed derivation | `ElabError` with a span. `@expect reject` tests write those fields explicitly. |
 | Prelude | `use lib::{a, b};` copies the named fns plus their transitive library fns and consts. `print` emits them expanded. |
 | `&'static str` | A global leaking interner, one copy per distinct string. |
@@ -234,7 +234,7 @@ per fn. Input namespaces are per unit.
   everywhere (elaboration is two-pass: collect labels, then elaborate bodies).
 - **`const c = cexpr;`**: no type annotation, because `Constant` stores none. `cexpr` is the
   `ConstExpr` subset of `expr`: literals, `const(c)` (or a bare name, which is always a const
-  here), unary and binary ops, casts, field (`::<T>` required unless derivable), index, array
+  here), unary and binary ops, casts, field (`::<T>` / `::<T; B>` required unless derivable), index, array
   literal, construct. Anything else is an `ElabError`.
 - **`fn`**: the `@hosts(...)` list is `Function.host_inputs`, and omitted means empty. Omitted
   `@hash` means 0.
@@ -297,7 +297,7 @@ they're binary ops, §10).
 | `Ambient(k)` | `ambient(origin \| pos3 \| origin_scale \| position_scale)` | same |
 | `FunctionCall` | `f(a, …)` | `f(a, …)` |
 | `ExternCall` | `ext name(a, …)` (signature from `Env`) or `ext name::<(T, …) -> R>(a, …)` | always with `::<…>` |
-| `Field` | `e.x` (type derived, index `None`), `e.x::<T>`, `e.x::<T, i>` | `e.x::<T>` / `e.x::<T, i>` |
+| `Field` | `e.x` (field and base type derived), `e.x::<T>` (base type derived), `e.x::<T; B>` | `e.x::<T>`, or `e.x::<T; B>` when `type_of(e)` isn't `B` |
 | `ArrayAccess` | `e[i]` | `e[i]` |
 | `Construct { t, args }` | `vec3(a,b,c)`, `pos3(a,b,c)`, `new T(args)` | `vec3(…)`/`pos3(…)` for those types, else `new T(…)` |
 | `ConstructExtern { t, args }` | `new T { f: e, … }` (any `T`; a non-extern one is the checker's business) | same, fields in IR order |
@@ -345,9 +345,9 @@ These are the only derivations. Anything else that's missing is a syntax error.
 1. **Extern signature**: `ext name(…)` without `::<…>` takes `parameter_types` and `return_type`
    from `Env::extern_fn`. An unknown extern is an `ElabError`. The arity isn't checked against
    the args (that's the checker's job), so arity tests stay writable.
-2. **Field type**: `e.x` without `::<…>` needs `type_of(e)`. Then `vec3.{x,y,z}` → `f64`,
-   `pos3.{x,y,z}` → `i32`, and `extern R` → the field's type from `Env::extern_type`. The derived
-   `known_idnex` is always `None`, which matches what the legacy builder emits.
+2. **Field type and base type**: `e.x` without `; B` takes `base_type = type_of(e)`. Without
+   `::<…>` the field type is derived from the base type: `vec3.{x,y,z}` → `f64`,
+   `pos3.{x,y,z}` → `i32`, and `extern R` → the field's type from `Env::extern_type`.
 3. **Density-input var**: §5.3.
 4. **Defaults**: `source_hash = 0`. Omitted lists are empty.
 
@@ -496,8 +496,9 @@ use the canonical expression spellings. Floats use §10.2.
 - Every binary op, cast and unary op is parenthesized as in §6.1, including the outermost
   expression of a statement. The `if` / `while` condition is printed as a plain expression, so it
   carries its own parens when it's a binary op.
-- `ext` always carries `::<(T, …) -> R>`, fields always carry `::<T>` or `::<T, i>`, and density
-  reads are always qualified.
+- `ext` always carries `::<(T, …) -> R>`, fields always carry `::<T>`, and density reads are
+  always qualified. A field writes `; B` only when `type_of(base)` (§6.3, replayed on the IR by
+  `printer/derive.rs`) isn't its `base_type`.
 - Labels are quoted when they aren't identifiers or when they're keywords.
 
 ### 10.2 Floats
@@ -516,7 +517,7 @@ The precondition is that every `Ref` resolves: arena refs into their program are
 helpers work), and `DensityInput.var` into **some** fn's `variables` (found with
 `Arena::contains`). Anything else panics with a message that names the dangling entity. Every
 other IR shape prints, including `HostInput::Dynamic` (`host %N dynamic;`), unregistered externs,
-type-inconsistent expressions, `known_idnex` values that disagree with the field name,
+type-inconsistent expressions, `base_type`s that disagree with the base,
 `ConstructExtern` with a non-extern type and repeated `parameters`, and the output loads again.
 The one exception is depth: a program nested deeper than the limits of §6.2 prints, but its text
 doesn't load.
@@ -577,10 +578,6 @@ and cycles, and every envelope validation error.
 - **Explicit helper lists vs prelude**: using `sin` means listing its whole library closure in
   `helpers`. The checker error names what's missing. If this gets tedious, a list form like
   `helpers [..use]` can be added later without changing the IR mapping.
-- **`known_idnex` vs field name**: CUDA renders a vector field from `known_idnex` and Rust from
-  `field`, so `e.x::<f64, 2>` means `.z` on CUDA and `.x` on Rust. The format can express this on
-  purpose. The checker should reject inconsistent `vec3`/`pos3` fields (to be added to TESTING.md
-  §5.3).
 - **Density-input var type**: the lenient default declares it as `density`, which is what legacy
   conversion produces and what the Rust backend skips. Real programs that use another type still
   print and parse through the explicit `@var` form.

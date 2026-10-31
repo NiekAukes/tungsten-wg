@@ -2,6 +2,7 @@
 
 use tungsten_ir::*;
 
+use super::derive::Deriver;
 use super::expr::{ExprPrinter, const_to_expression, type_text};
 use super::float::{f64_lit, quote_string};
 use super::labels::Labels;
@@ -45,8 +46,10 @@ pub fn print(p: &OptimizedProgram) -> String {
     sections.push(s);
 
     let mut s = String::new();
+    let derive = Deriver::new(p);
     let consts = ExprPrinter {
         labels: &labels,
+        derive: &derive,
         f: None,
     };
     for (c, constant) in p.constants.iter() {
@@ -228,7 +231,12 @@ fn function_text(p: &OptimizedProgram, labels: &Labels, f: Ref<Function>, indent
         }
         s.push_str(&format!("{pad}    }}\n"));
     }
-    let ep = ExprPrinter { labels, f: Some(f) };
+    let derive = Deriver::new(p);
+    let ep = ExprPrinter {
+        labels,
+        derive: &derive,
+        f: Some(f),
+    };
     stmts(&func.body, f, labels, &ep, indent + 1, &mut s);
     s.push_str(&format!("{pad}}}"));
     if indent == 0 {

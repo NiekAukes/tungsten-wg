@@ -361,8 +361,8 @@ pub enum ExprKind {
         base: Box<Expr>,
         name: String,
         name_span: Span,
-        /// `::<T>` or `::<T, i>`
-        ty: Option<(Ty, Option<usize>)>,
+        /// `::<T>` (field type) or `::<T; B>` (field type, base type)
+        ty: Option<(Ty, Option<Ty>)>,
     },
     Index {
         base: Box<Expr>,

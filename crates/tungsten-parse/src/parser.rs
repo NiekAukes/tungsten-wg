@@ -1067,13 +1067,13 @@ impl Parser {
                     let ty = if self.eat(&Tok::ColonColon) {
                         self.expect(Tok::Lt)?;
                         let t = self.ty()?;
-                        let idx = if self.eat(&Tok::Comma) {
-                            Some(self.usize_()?)
+                        let base = if self.eat(&Tok::Semi) {
+                            Some(self.ty()?)
                         } else {
                             None
                         };
                         self.expect(Tok::Gt)?;
-                        Some((t, idx))
+                        Some((t, base))
                     } else {
                         None
                     };

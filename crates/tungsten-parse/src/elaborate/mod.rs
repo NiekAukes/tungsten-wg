@@ -7,7 +7,7 @@
 mod body;
 mod envelope;
 mod library;
-mod types;
+pub(crate) mod types;
 
 use std::collections::HashMap;
 use std::rc::Rc;

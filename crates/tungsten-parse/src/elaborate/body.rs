@@ -268,12 +268,22 @@ impl<'a> Ctx<'a> {
                 ty,
             } => {
                 let (b, bt) = self.child(sc, base, path, ExprStep::Base)?;
-                let (t, known_idnex) = match ty {
-                    Some((t, idx)) => (var_type(t), *idx),
+                let explicit_base = ty.as_ref().and_then(|(_, b)| b.as_ref()).map(var_type);
+                let Some(base_type) = explicit_base.or(bt) else {
+                    return err(
+                        *name_span,
+                        format!(
+                            "can't derive the type of the base of field `{name}`; \
+                             write `.{name}::<T; B>`"
+                        ),
+                    );
+                };
+                let t = match ty {
+                    Some((t, _)) => var_type(t),
                     None => {
-                        let derived = bt.as_ref().and_then(|bt| field_type(bt, name, self.env));
+                        let derived = field_type(&base_type, name, self.env);
                         match derived {
-                            Some(t) => (t, None),
+                            Some(t) => t,
                             None => {
                                 return err(
                                     *name_span,
@@ -290,7 +300,7 @@ impl<'a> Ctx<'a> {
                         base: Box::new(b),
                         field: name.clone(),
                         type_of_field: t.clone(),
-                        known_idnex,
+                        base_type,
                     },
                     Some(t),
                 )

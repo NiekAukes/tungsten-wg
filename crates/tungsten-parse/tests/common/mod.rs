@@ -280,7 +280,7 @@ pub fn gen_expr(rng: &mut Rng, sc: &Scope, depth: usize) -> Expression {
             base: Box::new(sub(rng)),
             field: rng.pick(FIELDS).to_string(),
             type_of_field: gen_type(rng, 1, false),
-            known_idnex: rng.chance(1, 2).then(|| rng.below(4)),
+            base_type: gen_type(rng, 1, false),
         },
         9 => Expression::ArrayAccess {
             array: Box::new(sub(rng)),
@@ -347,7 +347,7 @@ fn gen_const_expr(rng: &mut Rng, earlier: &[Ref<Constant>], depth: usize) -> Con
             base: b(rng),
             field: rng.pick(FIELDS).to_string(),
             type_of_field: gen_type(rng, 1, false),
-            known_idnex: rng.chance(1, 2).then(|| rng.below(3)),
+            base_type: gen_type(rng, 1, false),
         },
         5 => ConstExpr::ArrayAccess {
             array: b(rng),

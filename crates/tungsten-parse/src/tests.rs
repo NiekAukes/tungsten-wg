@@ -571,17 +571,18 @@ fn derived_fields_and_externs() {
             value:
                 Expression::Field {
                     type_of_field,
-                    known_idnex,
+                    base_type,
                     ..
                 },
             ..
-        } => (type_of_field.clone(), *known_idnex),
+        } => (type_of_field.clone(), base_type.clone()),
         s => panic!("{s:?}"),
     };
-    assert_eq!(field(0), (VariableType::F64, None));
-    assert_eq!(field(1), (VariableType::I32, None));
-    assert_eq!(field(2), (VariableType::F64, None));
-    assert_eq!(field(3), (VariableType::I32, None));
+    let rec = VariableType::Extern("Rec");
+    assert_eq!(field(0), (VariableType::F64, VariableType::Vec3));
+    assert_eq!(field(1), (VariableType::I32, VariableType::Pos3));
+    assert_eq!(field(2), (VariableType::F64, rec.clone()));
+    assert_eq!(field(3), (VariableType::I32, rec));
     match &f.body[4] {
         Statement::Assign {
             value:
@@ -623,8 +624,13 @@ fn underivable_types_are_errors_only_when_needed() {
         "program { fn f() -> f64 { return (1 + 1.0).x; } }",
         "can't derive",
     );
-    // … but writing the type makes it fine, and an underivable operand elsewhere is no problem
-    ok("program { fn f() -> f64 { return (1 + 1.0).x::<f64>; } }");
+    // … and neither can its base type, so the field type alone isn't enough …
+    fails(
+        "program { fn f() -> f64 { return (1 + 1.0).x::<f64>; } }",
+        "can't derive the type of the base",
+    );
+    // … but writing both makes it fine, and an underivable operand elsewhere is no problem
+    ok("program { fn f() -> f64 { return (1 + 1.0).x::<f64; vec3>; } }");
     ok("program { fn f() -> f64 { return (1 + 1.0); } }");
     fails(
         "program { fn f(a: f64) -> f64 { return a.x; } }",
@@ -640,16 +646,41 @@ fn underivable_types_are_errors_only_when_needed() {
         "unknown extern",
     );
     ok("program { fn f() -> f64 { return ext unknown::<(f64) -> f64>(1.0); } }");
-    // explicit index is kept
-    let t = ok("program { fn f(v: vec3) -> f64 { return v.x::<f64, 2>; } }");
+    // an explicit base type is kept, even when it disagrees with the derived one
+    let t = ok("program { fn f(v: vec3) -> f64 { return v.x::<f64; pos3>; } }");
     let (_, f) = find_fn(&t, "f");
     assert!(matches!(
         &f.body[0],
         Statement::Return(Expression::Field {
-            known_idnex: Some(2),
+            base_type: VariableType::Pos3,
             ..
         })
     ));
+    // the old index form is gone
+    fails(
+        "program { fn f(v: vec3) -> f64 { return v.x::<f64, 2>; } }",
+        "expected",
+    );
+}
+
+#[test]
+fn base_type_is_printed_only_when_needed() {
+    let src = "program { fn f(v: vec3, a: [pos3; 2]) -> f64 {
+        vars { r: f64, s: i32 }
+        r = v.x;
+        s = a[1].y;
+        r = v.x::<f64; pos3>;
+        r = (1 + 1.0).z::<f64; vec3>;
+        return r;
+    } }";
+    let t = ok(src);
+    let text = print(&t.program);
+    assert!(text.contains("v.x::<f64>;"), "{text}");
+    assert!(text.contains("a[1].y::<i32>;"), "{text}");
+    assert!(text.contains("v.x::<f64; pos3>;"), "{text}");
+    assert!(text.contains(".z::<f64; vec3>;"), "{text}");
+    let again = load(&text, FileId(0), &NoEnv).unwrap_or_else(|d| panic!("{d}\n{text}"));
+    assert!(isomorphic(&again.program, &t.program));
 }
 
 #[test]
@@ -1857,7 +1888,7 @@ fn empty_program_prints_and_parses() {
 #[test]
 fn printing_is_total_for_unusual_programs() {
     // a helper shared between two units that reads a density input of only one of them,
-    // an unregistered extern, a dynamic host, a known_idnex that disagrees with the field
+    // an unregistered extern, a dynamic host, a base type that disagrees with the base
     let mut p = empty_program();
     let mut leaf = func(Some("leaf"));
     leaf.body = vec![Statement::Return(Expression::Double(1.0))];
@@ -1888,7 +1919,7 @@ fn printing_is_total_for_unusual_programs() {
         base: Box::new(Expression::DensityVariable(d, None)),
         field: "x".into(),
         type_of_field: VariableType::F64,
-        known_idnex: Some(2),
+        base_type: VariableType::Vec3,
     })];
     let shared_f = p.functions.insert(shared);
     let mut root = func(Some("root"));
@@ -1932,7 +1963,7 @@ fn printing_is_total_for_unusual_programs() {
         text.contains("ext `never registered`::<(extern Odd) -> [vec3; 3]>(shared())"),
         "{text}"
     );
-    assert!(text.contains("::<f64, 2>"), "{text}");
+    assert!(text.contains(".x::<f64; vec3>"), "{text}");
     assert!(text.contains("host %0 dynamic;"), "{text}");
     let t = load(&text, FileId(0), &NoEnv).unwrap_or_else(|d| panic!("{d}\n{text}"));
     assert!(isomorphic(&t.program, &compact(&p)));

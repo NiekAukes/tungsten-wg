@@ -542,7 +542,8 @@ pub enum Expression {
         base: Box<Expression>,
         field: String,
         type_of_field: VariableType,
-        known_idnex: Option<usize>, // for cases where we know the index of the field (e.g. for vec3.x, vec3.y, vec3.z)
+        /// Type of `base`; used to resolve `field`.
+        base_type: VariableType,
     },
 
     ArrayAccess {
@@ -610,7 +611,8 @@ pub enum ConstExpr {
         base: Box<ConstExpr>,
         field: String,
         type_of_field: VariableType,
-        known_idnex: Option<usize>, // for cases where we know the index of the field (e.g. for vec3.x, vec3.y, vec3.z)
+        /// Type of `base`; used to resolve `field`.
+        base_type: VariableType,
     },
 
     ArrayAccess {

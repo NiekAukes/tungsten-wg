@@ -108,7 +108,7 @@ const SHAPES: &[(&str, Shape)] = &[
         base: Box::new(e),
         field: "x".into(),
         type_of_field: VariableType::F64,
-        known_idnex: None,
+        base_type: VariableType::Vec3,
     }),
     ("calls", |e, p| Expression::FunctionCall {
         function: p.functions.iter().next().unwrap().0,
