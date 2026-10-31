@@ -89,8 +89,6 @@ pub enum LowerErrorKind {
     UnknownField { base: String, field: String },
     #[error("field access on `{base}`, which is not vec3, pos3 or a record")]
     FieldOnNonStruct { base: String },
-    #[error("the type of a field access base can't be synthesized")]
-    Unsynthesizable,
     #[error("dynamic host inputs are not supported")]
     DynamicHost,
     #[error("`density` can't be used as a value type")]

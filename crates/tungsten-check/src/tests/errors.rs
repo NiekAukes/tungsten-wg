@@ -55,34 +55,11 @@ fn field_on_non_struct() {
 }
 
 #[test]
-fn unsynthesizable() {
+fn field_on_non_struct_base_type() {
+    // The selector comes from the stored base type, not the base.
     assert_eq!(
-        reg_errs("", "return [][0].x::<f64>;"),
-        ["fn `top` › stmt 0 › value: the type of a field access base can't be synthesized"]
-    );
-    // A constant cycle (text can't express it): `k = k + 1.0`, `m = k.x`.
-    let mut p = empty();
-    let k = p.constants.insert(Constant {
-        value: ConstExpr::Double(0.0),
-        name: "k".into(),
-    });
-    p.constants[k].value = ConstExpr::BinaryOp {
-        op: BinaryOperator::Add,
-        left: Box::new(ConstExpr::Constant(k)),
-        right: Box::new(ConstExpr::Double(1.0)),
-    };
-    p.constants.insert(Constant {
-        value: ConstExpr::Field {
-            base: Box::new(ConstExpr::Constant(k)),
-            field: "x".into(),
-            type_of_field: VariableType::F64,
-            known_idnex: None,
-        },
-        name: "m".into(),
-    });
-    assert_eq!(
-        errs(&p, &registry()),
-        ["const `m`: the type of a field access base can't be synthesized"]
+        reg_errs("", "return ambient(origin).x::<f64; [f64; 3]>;"),
+        ["fn `top` › stmt 0 › value: field access on `array[f64; 3]`, which is not vec3, pos3 or a record"]
     );
 }
 

@@ -15,7 +15,6 @@ mod error;
 mod lower;
 mod map;
 mod registry;
-mod synth;
 
 #[cfg(test)]
 mod tests;

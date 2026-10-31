@@ -14,7 +14,7 @@ use super::{Ctx, get};
 use crate::error::{EntityKind, Item, LowerError, LowerErrorKind, ParameterProblem, Step};
 use crate::map::{IdMap, LowerMap};
 use crate::registry::Registry;
-use crate::synth::{Synthesizer, const_to_expr};
+use super::const_to_expr;
 
 fn name_str(n: &Name) -> Option<&str> {
     match n {
@@ -31,7 +31,6 @@ pub(crate) fn run(
     let mut cx = Ctx {
         p,
         reg,
-        synth: Synthesizer::new(p),
         map: build_ids(p),
         errors: vec![],
         item: Item::Registry,

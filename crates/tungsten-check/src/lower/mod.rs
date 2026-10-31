@@ -1,5 +1,6 @@
 //! The lowering walker. Extern and record names resolve against the [`Registry`].
 
+mod consts;
 mod expr;
 mod program;
 mod stmt;
@@ -13,9 +14,9 @@ use tungsten_ir::{Arena, Function, OptimizedProgram, Ref, Var, VariableType};
 use crate::error::{Item, Location, LowerError, LowerErrorKind, Step};
 use crate::map::LowerMap;
 use crate::registry::Registry;
-use crate::synth::Synthesizer;
 use types::{TypeFail, lower_type};
 
+pub(crate) use consts::const_to_expr;
 pub(crate) use program::run;
 
 /// `Arena::get` without the panics: `contains` compares tags without asserting.
@@ -28,7 +29,6 @@ pub(crate) fn get<T>(a: &Arena<T>, r: Ref<T>) -> Option<&T> {
 pub(crate) struct Ctx<'p, 'r> {
     pub p: &'p OptimizedProgram,
     pub reg: &'r Registry,
-    pub synth: Synthesizer<'p>,
     pub map: LowerMap,
     pub errors: Vec<LowerError>,
     pub item: Item,

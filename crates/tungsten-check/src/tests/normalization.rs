@@ -156,14 +156,16 @@ fn fields() {
             ty: Type::I32
         }
     );
-    // Mixed vec3/pos3 arithmetic synthesizes vec3.
-    assert!(matches!(
-        ret("return (ambient(pos3) + ambient(origin)).x;"),
+    // The selector follows the stored base type, even when it disagrees with the base. Lowering
+    // doesn't validate it; the checker rejects the mismatch.
+    assert_eq!(
+        ret("return ambient(origin).x::<f64; pos3>;"),
         Expr::Field {
-            sel: FieldSel::Vec3(Axis::X),
-            ..
+            base: b(Expr::Ambient(Ambient::Origin)),
+            sel: FieldSel::Pos3(Axis::X),
+            ty: Type::F64
         }
-    ));
+    );
     // The annotation is kept as written; the selector comes from the base.
     assert_eq!(
         ret("return new extern Pair(1.0, 2).b::<f32>;"),

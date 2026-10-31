@@ -8,7 +8,6 @@ use tungsten_ir::{AmbientKind, BinaryOperator, Expression, UnaryOperator, Variab
 use super::Ctx;
 use super::types::type_name;
 use crate::error::{EntityKind, LowerErrorKind, Step};
-use crate::synth::Fail;
 
 /// Stands in for a subexpression that failed to lower. Never escapes: a lowering with errors
 /// returns no program.
@@ -142,9 +141,9 @@ impl<'p, 'r> Ctx<'p, 'r> {
                 base,
                 field,
                 type_of_field,
-                known_idnex: _,
+                base_type,
             } => {
-                let sel = self.field_sel(base, field);
+                let sel = self.field_sel(base_type, field);
                 let ty = self.at(Step::Type, |cx| cx.ty(type_of_field));
                 let base = self.boxed(Step::Base, base);
                 Expr::Field { base, sel, ty }
@@ -164,27 +163,21 @@ impl<'p, 'r> Ctx<'p, 'r> {
         }
     }
 
-    /// Picks the selector from the synthesized base type. The field's annotation is lowered
-    /// separately and never filled from here.
-    fn field_sel(&mut self, base: &Expression, field: &str) -> FieldSel {
+    /// Picks the selector from the IR's `base_type`. That annotation is trusted only for this:
+    /// if it is wrong, the selector doesn't fit the base and the checker rejects. The field's own
+    /// type is lowered separately.
+    fn field_sel(&mut self, bt: &VariableType, field: &str) -> FieldSel {
         let fallback = FieldSel::Vec3(Axis::X);
-        let f = self.func;
-        let bt = match self.synth.expr(f, base) {
-            Ok(VariableType::DensityInput) | Err(Fail::Broken) => return fallback,
-            Err(Fail::Unsynthesizable) => {
-                self.err(LowerErrorKind::Unsynthesizable);
-                return fallback;
-            }
-            Ok(t) => t,
-        };
         let unknown = |cx: &mut Self| {
             cx.err(LowerErrorKind::UnknownField {
-                base: type_name(&bt),
+                base: type_name(bt),
                 field: field.to_string(),
             });
             fallback.clone()
         };
-        match &bt {
+        match bt {
+            // Reported where the density input is read.
+            VariableType::DensityInput => fallback,
             VariableType::Vec3 => match axis(field) {
                 Some(a) => FieldSel::Vec3(a),
                 None => unknown(self),

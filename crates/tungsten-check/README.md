@@ -45,8 +45,7 @@ small.
 | `DanglingRef { kind }` | A ref that is stale, removed or from another arena. Includes a `Var` from another function, a `DensityInput` ref found in no unit's arena, and `EntryPoint.density_function`. |
 | `UnknownExtern` / `UnknownRecord` | The name isn't in the registry. |
 | `UnknownField { base, field }` | Not `x`/`y`/`z` on Vec3/Pos3, or not in the registry's record. |
-| `FieldOnNonStruct { base }` | The synthesized base type isn't Vec3, Pos3 or a record. |
-| `Unsynthesizable` | A `Field` base whose type can't be synthesized. |
+| `FieldOnNonStruct { base }` | The `Field`'s `base_type` isn't Vec3, Pos3 or a record. |
 | `DynamicHost` | `HostInput::Dynamic`. |
 | `DensityInputType` | `VariableType::DensityInput` as a parameter, return type, host, annotation, cast target or array element, or a read or assign of a `DensityInput` var. |
 | `BadConstruct { t }` | `Construct` on a type other than Vec3/Pos3/Extern, or `ConstructExtern` on a non-`Extern` type. |
@@ -59,8 +58,8 @@ record fields, a positional record construct with too few args, empty array lite
 and cross-unit density reads.
 
 Dropped during lowering (kept in `LowerMap` where it matters): every name, `canonical_name`,
-`source_hash`, `DensityInput.var`, table idents, and `known_idnex` (ignored; selectors always
-come from names).
+`source_hash`, `DensityInput.var` and table idents. A `Field`'s `base_type` is used only to pick
+the selector.
 
 ## Files at a glance
 
@@ -74,7 +73,7 @@ src/
     stmt.rs       statements, and how a Var ref becomes a LocalId
     expr.rs       expressions: the big match, field selection, constructs
     types.rs      VariableType → core Type
-  synth.rs        guesses an expression's type, only to resolve field names
+    consts.rs     ConstExpr → Expression, so constants go through the expression walker
   map.rs          LowerMap: core id ↔ tungsten-ir Ref, plus names
   error.rs        LowerError, LowerErrorKind, Location (Item + path of Steps)
   tests/          see "Tests" below
@@ -167,33 +166,26 @@ When something fails, the arm records an error and returns a **placeholder** (a 
 or id 0) so the walk can continue and find further errors. Placeholders never escape, because
 `lower` returns `Err` if any error was recorded.
 
-### 6. Field selection and `synth.rs`
+### 6. Field selection
 
 To turn `foo.x` into a `FieldSel`, the lowering has to know whether `foo` is a `vec3`, a
-`pos3` or a record. `tungsten-ir` doesn't store that, so `field_sel` asks the `Synthesizer` to
-work out `foo`'s type bottom-up:
+`pos3` or a record. `tungsten-ir` stores that on every `Field` as `base_type`, filled by whoever
+built the IR (legacy conversion, tungsten-parse, frontends). `field_sel` reads it:
 
-- a variable → its declared type
-- a call → the callee's return type
-- an extern call → its annotated return type
-- a constant → its initializer's type (memoized; a cycle gives up)
-- a density read → the source unit's main function's return type
-- binary ops, casts, constructs, indexing, … → the obvious rule (see the `match` in
-  `Synthesizer::expr`)
-
-Synthesis returns either a type, `Unsynthesizable` (reported as an error) or `Broken` (some
-ref inside was dangling, a `density` var was read, or a `Dynamic` host was used; all reported
-elsewhere, so it stays quiet). A few rules that aren't obvious: mixed `Vec3`/`Pos3` arithmetic
-gives `Vec3`, `Index` on `vec3`/`pos3` gives `f64`/`i32` (as in tungsten-parse), an empty
-`ArrayLit` is `Unsynthesizable`, and a Base3DNoise / Perlin table gives the sampler /
-permutation-table type.
+- `vec3` / `pos3` → `FieldSel::Vec3(axis)` / `FieldSel::Pos3(axis)`, or `UnknownField` if the
+  name isn't `x`/`y`/`z`
+- an extern record → `FieldSel::Record(id, index)` via the registry, or `UnknownRecord` /
+  `UnknownField`
+- `density` → a quiet placeholder (the read of the `density` value is reported on its own)
+- anything else → `FieldOnNonStruct`
 
 A `density`-typed parameter is reported once at the parameter, and again at every read or
 assign, since reading a `DensityInput` var is its own error.
 
-**Synthesis is used for nothing else.** It never fills in an annotation. If it guesses wrong,
-the result is a wrong `FieldSel`, and the checker will notice that the base doesn't have that
-type. So a synthesis bug can produce a false rejection, never a silently miscompiled program.
+**`base_type` is trusted for nothing else**, and lowering doesn't compare it with the base. If
+it is wrong, the result is a wrong `FieldSel`, and the checker will notice that the base doesn't
+have that type. So a bad annotation can produce a false rejection, never a silently miscompiled
+program.
 
 ## Errors and locations (`error.rs`, `lower/mod.rs`)
 
@@ -292,7 +284,7 @@ here too, with the same signature.
 | Topic | Decision | Rejected, and why |
 | --- | --- | --- |
 | What fails lowering | Only what the core IR can't represent. All errors are collected, each with a location. | Type-checking here (more trusted code); stopping at the first error. |
-| Field resolution | Synthesize base types bottom-up **only** to pick the selector, and store it in the IR. A synthesis bug becomes a checker reject, not a silent change. | A field-name string in the core IR. |
+| Field resolution | The IR stores the base type (`Field::base_type`); lowering trusts it only to pick the selector, and the checker validates it. A bad annotation becomes a checker reject, not a silent change. | A field-name string in the core IR; re-deriving the base type bottom-up in lowering (the old `synth.rs`, a second copy of the frontends' type rules). |
 | Record construction | `MakeRecord` fields in **written** order, duplicates kept; evaluation follows source order. | Reordering to registry order: changes which error wins. |
 | Empty `ArrayLiteral` | Lowered to `ArrayLit([])`; the checker rejects it. | A lowering error. |
 | Registry | Always required and strict. Frontends build it with the public `RegistryBuilder` (the testsuite's `registry.toml` loader too). | An Infer mode that builds the tables from the program's own annotations. It existed briefly and was removed: it only checks the program against itself, never against the runtime, and needs unverified evidence-merging rules. |
@@ -303,13 +295,12 @@ here too, with the same signature.
 
 Open questions:
 
-- An optional cross-check of `known_idnex` against the resolved selector.
 - A `RegistryBuilder` that takes core `Type`s directly, if a non-tungsten-ir caller appears.
 
 ## When you change something
 
-- **New `tungsten-ir` `Expression` variant:** add an arm in `lower/expr.rs::expr` *and* in
-  `synth.rs::Synthesizer::expr`, plus a normalization test.
+- **New `tungsten-ir` `Expression` variant:** add an arm in `lower/expr.rs::expr`, plus a
+  normalization test.
 - **New core IR variant:** see the checklist in `tungsten-core/README.md`. On this side: the
   lowering, and `tests/wf_mirror.rs`.
 - **New error kind:** add it to `LowerErrorKind` in `error.rs` with a `Display` message, and
