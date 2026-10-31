@@ -133,7 +133,7 @@ pub const JAVA_RESERVED: &[&str] = &[
 ];
 
 /// C++20 keywords and alternative tokens, CUDA built-ins used unqualified, and names the generated
-/// CUDA files declare or use (see the CUDA SPEC.md §4.1).
+/// CUDA files declare or use.
 pub const CUDA_RESERVED: &[&str] = &[
     // C++20 keywords
     "alignas", "alignof", "asm", "auto", "bool", "break", "case", "catch", "char", "char8_t",
